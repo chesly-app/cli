@@ -10,6 +10,14 @@ export const EXIT = {
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
 
+/** A keychain call that got no answer in time: the keychain is locked, or a dialog is waiting for someone. */
+export class KeychainTimeoutError extends Error {
+  constructor(readonly seconds: number) {
+    super(`The keychain didn't answer within ${seconds} s.`);
+    this.name = 'KeychainTimeoutError';
+  }
+}
+
 /** The problem `type` for an error code, the API's convention, which the CLI's own errors share. */
 export function errorType(code: string): string {
   return `https://agents.chesly.app/docs/errors#${code}`;

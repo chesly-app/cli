@@ -13,24 +13,33 @@ export const keychain = {
   value: null as string | null,
   /** False simulates a machine with no keychain (no Secret Service on Linux, no prebuilt binding). */
   available: true,
+  /** Every call rejects with this while it is set: a locked keychain, or one that never answered. */
+  failure: null as Error | null,
   reset(): void {
     this.value = null;
     this.available = true;
+    this.failure = null;
   },
 };
 
 export async function openFakeKeychain(): Promise<Keychain | null> {
   if (!keychain.available) return null;
+  const answer = async <T>(result: () => T): Promise<T> => {
+    if (keychain.failure) throw keychain.failure;
+    return result();
+  };
   return {
-    get: async () => keychain.value,
-    set: async (key) => {
-      keychain.value = key;
-    },
-    delete: async () => {
-      const had = keychain.value !== null;
-      keychain.value = null;
-      return had;
-    },
+    get: () => answer(() => keychain.value),
+    set: (key) =>
+      answer(() => {
+        keychain.value = key;
+      }),
+    delete: () =>
+      answer(() => {
+        const had = keychain.value !== null;
+        keychain.value = null;
+        return had;
+      }),
   };
 }
 
@@ -130,6 +139,11 @@ export function cliProblem(code: string, title: string): Record<string, unknown>
 /** The last line of stderr: where JSON mode puts the error, after any sign-in instructions. */
 export function lastLine(text: string): string {
   return text.trim().split('\n').at(-1) ?? '';
+}
+
+/** The first line of stderr: where JSON mode puts the sign-in link and code. */
+export function firstLine(text: string): string {
+  return text.trim().split('\n')[0] ?? '';
 }
 
 /**

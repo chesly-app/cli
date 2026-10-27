@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Never touch the real keychain, even by accident.
 vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./helpers.js')).openFakeKeychain }));
 
+import pkg from '../package.json' with { type: 'json' };
 import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
 import {
@@ -225,5 +226,12 @@ describe('output and exit codes', () => {
     expect(cap.stdout).toContain('--json');
     expect(cap.stdout).toContain('CHESLY_API_KEY');
     expect(cap.stdout).toMatch(/3\s+not signed in/i);
+  });
+});
+
+describe('package.json', () => {
+  it('stays_private_until_launch', () => {
+    // npm refuses to publish a private package. The `chesly` name is published by hand at launch.
+    expect(pkg.private).toBe(true);
   });
 });

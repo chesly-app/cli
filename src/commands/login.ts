@@ -28,6 +28,8 @@ export function registerLogin(program: Command, io: Io): void {
 Without --key, chesly login prints a link and a code, opens the browser when
 stdout is a terminal, and waits until you approve the code on web.chesly.app.
 It never reads input, so an agent can run it and show the link to a person.
+In JSON mode the link and the code are one line on stderr:
+  {"verification_uri_complete":"…","user_code":"ABCD-EFGH","expires_in":600}
 
 The key goes to the OS keychain, or to ~/.config/chesly/credentials.json
 (mode 0600) where there is no keychain. CHESLY_API_KEY, when set, wins over it.
@@ -86,12 +88,15 @@ async function approveInBrowser(out: Output): Promise<string> {
   const session = checkSession(
     await apiRequest<unknown>('/v1/cli/sessions', { method: 'POST', body: { client_name: hostname() } }),
   );
-  out.note(`To sign in, open this link:\n\n  ${session.link}\n\nApprove it if the page shows the code ${session.userCode}.`);
-  out.note(
-    out.io.isTTY && openBrowser(session.link)
-      ? 'Opened your browser. Waiting for approval… (Ctrl+C to cancel)'
-      : 'Waiting for approval… (Ctrl+C to cancel)',
+  // JSON mode: one line an agent can parse, to show the link and the code to its person.
+  out.notice(
+    { verification_uri_complete: session.link, user_code: session.userCode, expires_in: session.expiresIn },
+    () => `To sign in, open this link:\n\n  ${session.link}\n\nApprove it if the page shows the code ${session.userCode}.`,
   );
+  const opened = out.io.isTTY && openBrowser(session.link);
+  if (!out.json) {
+    out.note(`${opened ? 'Opened your browser. ' : ''}Waiting for approval… (Ctrl+C to cancel)`);
+  }
 
   let interval = session.interval;
   const expiresAt = Date.now() + session.expiresIn * 1000;

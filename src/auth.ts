@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { isApiKey } from './api.js';
-import { CliError, EXIT } from './errors.js';
+import { CliError, EXIT, KeychainTimeoutError } from './errors.js';
 import { openKeychain } from './keychain.js';
 
 /** Where the key in use came from. */
@@ -24,9 +24,14 @@ async function findKey(): Promise<{ key: string; source: KeySource } | null> {
   const fromEnv = process.env.CHESLY_API_KEY?.trim();
   if (fromEnv) return { key: wellFormed(fromEnv, 'env'), source: 'env' };
   const fromKeychain = await readKeychain();
-  if (fromKeychain) return { key: wellFormed(fromKeychain, 'keychain'), source: 'keychain' };
+  if (fromKeychain.key) return { key: wellFormed(fromKeychain.key, 'keychain'), source: 'keychain' };
   const fromFile = await readCredentialsFile();
   if (fromFile) return { key: wellFormed(fromFile, 'file'), source: 'file' };
+  // A keychain that never answered may hold the key: say so, rather than "not signed in".
+  if (fromKeychain.timeout) {
+    const hint = 'Unlock it or answer the dialog, then try again, or set CHESLY_API_KEY.';
+    throw keychainTimeout('read the key from', fromKeychain.timeout, hint);
+  }
   return null;
 }
 
@@ -74,20 +79,37 @@ export async function storeKey(key: string): Promise<KeyStore> {
   return 'file';
 }
 
-/** Removes the stored key from the keychain and the file. Returns where one was found. */
+/**
+ * Removes the stored key from the file, then from the keychain: the file first, so a keychain that
+ * fails (locked, no answer) can't leave the key behind in it. Returns where one was found.
+ */
 export async function deleteStoredKey(): Promise<KeyStore[]> {
-  const removed: KeyStore[] = [];
+  const fromFile = await removeCredentialsFile();
+  let fromKeychain = false;
   const keychain = await openKeychain();
   if (keychain) {
     try {
-      if (await keychain.delete()) removed.push('keychain');
+      fromKeychain = await keychain.delete();
     } catch (error) {
+      if (error instanceof KeychainTimeoutError) {
+        const hint = 'Unlock it or answer the dialog, then run `chesly logout` again.';
+        throw keychainTimeout('remove the key from', error, hint);
+      }
       const reason = error instanceof Error ? error.message : String(error);
       throw new CliError('keychain_error', `Couldn't remove the key from ${describeSource('keychain')}: ${reason}`);
     }
   }
-  if (await removeCredentialsFile()) removed.push('file');
+  const removed: KeyStore[] = [];
+  if (fromKeychain) removed.push('keychain');
+  if (fromFile) removed.push('file');
   return removed;
+}
+
+/** A keychain that didn't answer in time (keychain.ts gives up after 10 s): locked, or showing a dialog. */
+function keychainTimeout(action: string, error: KeychainTimeoutError, hint: string): CliError {
+  const why = 'It may be locked, or waiting for someone to answer a dialog.';
+  const message = `Couldn't ${action} ${describeSource('keychain')}: it didn't answer within ${error.seconds} s. ${why}`;
+  return new CliError('keychain_timeout', message, EXIT.ERROR, { hint });
 }
 
 /** For people: where a key came from or was stored. */
@@ -111,14 +133,15 @@ export function maskKey(key: string): string {
   return `${prefix}…${last4}`;
 }
 
-async function readKeychain(): Promise<string | null> {
+/** The keychain's key, if any. One that fails or times out falls through to the file, but a timeout is kept. */
+async function readKeychain(): Promise<{ key: string | null; timeout?: KeychainTimeoutError }> {
   const keychain = await openKeychain();
-  if (!keychain) return null;
+  if (!keychain) return { key: null };
   try {
-    return (await keychain.get())?.trim() || null;
-  } catch {
+    return { key: (await keychain.get())?.trim() || null };
+  } catch (error) {
     // Locked or no access: fall through to the file.
-    return null;
+    return error instanceof KeychainTimeoutError ? { key: null, timeout: error } : { key: null };
   }
 }
 

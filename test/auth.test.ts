@@ -8,12 +8,14 @@ vi.mock('node:child_process', () => ({ spawn: vi.fn(() => ({ on: vi.fn(), unref:
 import { spawn } from 'node:child_process';
 import { resolveKey } from '../src/auth.js';
 import { run } from '../src/cli.js';
+import { KeychainTimeoutError } from '../src/errors.js';
 import {
   KEY,
   ME,
   captureIo,
   cliProblem,
   credentialsFile,
+  firstLine,
   isolateEnv,
   json,
   keyFor,
@@ -156,14 +158,52 @@ describe('chesly login', () => {
       if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
       return json(200, ME);
     });
-    const cap = captureIo();
 
-    const exit = run(['login'], cap.io);
+    const terminal = captureIo(true);
+    const shown = run(['login'], terminal.io);
+    await vi.runAllTimersAsync();
+    expect(await shown).toBe(0);
+    expect(terminal.stderr).toMatch(/^ {2}https:\/\/web\.chesly\.app\/cli\?code=BCDF-GHJK$/m);
+    expect(terminal.stderr).not.toMatch(/^ {2}https:\/\/web\.chesly\.app\/cli$/m);
+
+    const piped = captureIo();
+    const printed = run(['login'], piped.io);
+    await vi.runAllTimersAsync();
+    expect(await printed).toBe(0);
+    expect(JSON.parse(firstLine(piped.stderr)).verification_uri_complete).toBe('https://web.chesly.app/cli?code=BCDF-GHJK');
+  });
+
+  it('device_login_in_json_mode_prints_the_link_and_code_as_one_json_line', async () => {
+    // An agent reads that line while chesly login waits, and shows the link and the code to its person.
+    vi.useFakeTimers();
+    mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      return json(200, ME);
+    });
+
+    for (const [argv, isTTY] of [
+      [['login'], false],
+      [['login', '--json'], true],
+    ] as const) {
+      const cap = captureIo(isTTY);
+      const exit = run([...argv], cap.io);
+      await vi.runAllTimersAsync();
+      expect(await exit).toBe(0);
+
+      expect(cap.stderr.split('\n').filter(Boolean).map((line) => JSON.parse(line))).toEqual([
+        { verification_uri_complete: SESSION.verification_uri_complete, user_code: 'BCDF-GHJK', expires_in: 600 },
+      ]);
+      expect(JSON.parse(cap.stdout)).toEqual(ME);
+    }
+
+    // A terminal still gets the instructions as text.
+    const terminal = captureIo(true);
+    const exit = run(['login'], terminal.io);
     await vi.runAllTimersAsync();
     expect(await exit).toBe(0);
-
-    expect(cap.stderr).toMatch(/^ {2}https:\/\/web\.chesly\.app\/cli\?code=BCDF-GHJK$/m);
-    expect(cap.stderr).not.toMatch(/^ {2}https:\/\/web\.chesly\.app\/cli$/m);
+    expect(terminal.stderr).toMatch(/^To sign in, open this link:$/m);
+    expect(terminal.stderr).toContain('Approve it if the page shows the code BCDF-GHJK.');
   });
 
   it('device_login_stops_when_access_is_denied', async () => {
@@ -307,6 +347,34 @@ describe('resolveKey', () => {
     expect(await run(['whoami'], terminal.io)).toBe(3);
     expect(terminal.stderr).toContain('chesly login');
   });
+
+  it('a_keychain_that_never_answers_is_a_problem_not_a_hang', async () => {
+    // keychain.ts gives up after 10 s (test/keychain.test.ts); here is what the command makes of it.
+    keychain.value = KEY;
+    keychain.failure = new KeychainTimeoutError(10);
+    const calls = mockFetch(() => json(200, ME));
+
+    const piped = captureIo();
+    expect(await run(['whoami'], piped.io)).toBe(1);
+    expect(JSON.parse(piped.stderr)).toMatchObject({ code: 'keychain_timeout' });
+    expect(calls).toHaveLength(0);
+
+    const terminal = captureIo(true);
+    expect(await run(['whoami'], terminal.io)).toBe(1);
+    expect(terminal.stderr).toContain("didn't answer within 10 s");
+
+    // chesly login falls back to the credentials file, as for a keychain that refuses, and that key works.
+    expect(await run(['login', '--key', keyFor('file')], captureIo().io)).toBe(0);
+    expect(JSON.parse(readFileSync(credentialsFile(env.home), 'utf8'))).toEqual({ api_key: keyFor('file') });
+    expect(await run(['whoami'], captureIo().io)).toBe(0);
+    expect(calls.at(-1)?.headers.authorization).toBe(`Bearer ${keyFor('file')}`);
+
+    // chesly logout still removes the file, then says the keychain didn't answer.
+    const logout = captureIo();
+    expect(await run(['logout'], logout.io)).toBe(1);
+    expect(JSON.parse(logout.stderr)).toMatchObject({ code: 'keychain_timeout' });
+    expect(existsSync(credentialsFile(env.home))).toBe(false);
+  });
 });
 
 describe('malformed keys', () => {
@@ -356,6 +424,19 @@ describe('chesly logout and chesly key', () => {
     expect(keychain.value).toBeNull();
     expect(existsSync(credentialsFile(env.home))).toBe(false);
     expect(cap.stdout).toMatch(/revoke/i);
+  });
+
+  it('logout_removes_the_key_file_even_when_the_keychain_fails', async () => {
+    keychain.value = KEY;
+    writeCredentials(env.home, KEY);
+    keychain.failure = new Error('The user name or passphrase you entered is not correct.');
+    const cap = captureIo();
+
+    expect(await run(['logout'], cap.io)).toBe(1);
+
+    // The file goes first, so a keychain that fails can't leave the key behind in it.
+    expect(existsSync(credentialsFile(env.home))).toBe(false);
+    expect(JSON.parse(cap.stderr)).toMatchObject({ code: 'keychain_error' });
   });
 
   it('key_reveal_prints_the_key_and_nothing_else', async () => {

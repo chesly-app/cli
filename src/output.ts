@@ -39,6 +39,14 @@ export class Output {
   note(text: string): void {
     this.io.err(withNewline(text));
   }
+
+  /**
+   * Something the person must see while the command runs, on stderr: `data` as one JSON line in JSON
+   * mode, `human()` in a terminal.
+   */
+  notice(data: unknown, human: () => string): void {
+    this.io.err(this.json ? `${toJson(data)}\n` : withNewline(human()));
+  }
 }
 
 /** Columns padded to line up, two spaces apart. */

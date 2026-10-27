@@ -2,7 +2,7 @@
   "name": "chesly",
   "version": "0.1.0",
   "description": "Chesly CLI: your chats from the terminal and your agents",
-  "private": false,
+  "private": true,
   "license": "UNLICENSED",
   "type": "module",
   "bin": {

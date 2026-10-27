@@ -27,10 +27,17 @@ chesly login --key ck_live_...   # or store a key you already have (checked firs
 ```
 
 `chesly login` prints a link and a code, opens your browser when it runs in a terminal, and waits
-until you approve the code. It never reads input, so an agent can run it and show you the link.
+until you approve the code. It never reads input, so an agent can run it and show you the link. In
+JSON mode (piped, or `--json`) the link and the code are one JSON line on stderr:
+
+```json
+{"verification_uri_complete":"https://web.chesly.app/cli?code=ABCD-EFGH","user_code":"ABCD-EFGH","expires_in":600}
+```
 
 The key goes to your OS keychain (macOS Keychain, Windows Credential Manager, or the Secret Service
-on Linux). Where there is none, it goes to `~/.config/chesly/credentials.json` with mode 0600.
+on Linux). Where there is none, it goes to `~/.config/chesly/credentials.json` with mode 0600. A
+keychain that doesn't answer within 10 seconds (locked, or showing a dialog nobody answers) fails
+the command with `keychain_timeout` instead of keeping it waiting.
 
 For CI and servers, set `CHESLY_API_KEY` instead. It wins over the stored key.
 
