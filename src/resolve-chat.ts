@@ -1,8 +1,9 @@
 import { apiRequest } from './api.js';
 import { requireKey } from './auth.js';
-import { chatTable, type ChatPage } from './commands/chats.js';
 import { CliError, EXIT } from './errors.js';
 import { indent } from './output.js';
+import { chatTable } from './render.js';
+import type { ChatPage } from './shapes.js';
 
 /** How many chats a name lookup asks for. */
 const LOOKUP_LIMIT = 10;

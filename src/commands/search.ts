@@ -3,9 +3,10 @@ import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { parseLimit } from '../options.js';
-import { Output, formatTable, formatWhen, oneLine, type Io } from '../output.js';
+import { Output, type Io } from '../output.js';
+import { searchTable } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
-import { messageText, senderLabel, type Message } from './read.js';
+import type { SearchHit } from '../shapes.js';
 
 interface SearchOptions {
   chat?: string;
@@ -39,26 +40,7 @@ Examples:
         query: { q, chat_id: chatId, limit: options.limit },
       });
       out.result(result, () =>
-        result.messages.length === 0 ? `No messages match "${q}".` : resultTable(result.messages),
+        result.messages.length === 0 ? `No messages match "${q}".` : searchTable(result.messages),
       );
     });
-}
-
-/** `GET /v1/messages/search` answers messages with the name and network of the chat each is in. */
-interface SearchHit extends Message {
-  chat_name: string | null;
-  network: string;
-}
-
-/** One row per message, in the API's order, with the chat it is in: its name, else its ID. */
-function resultTable(hits: readonly SearchHit[]): string {
-  return formatTable([
-    ['WHEN', 'CHAT', 'FROM', 'MESSAGE'],
-    ...hits.map((hit) => [
-      formatWhen(hit.sent_at, { time: true }),
-      oneLine(hit.chat_name ?? '', 30) || hit.chat_id,
-      senderLabel(hit),
-      oneLine(messageText(hit), 100),
-    ]),
-  ]);
 }

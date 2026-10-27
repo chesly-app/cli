@@ -3,14 +3,8 @@ import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
 import { parseCount } from '../options.js';
 import { Output, indent, oneLine, type Io } from '../output.js';
-import type { Chat } from './chats.js';
-import { transcript, type Message } from './read.js';
-
-/** `GET /v1/catch_up`. `truncated` is set when messages were left out to keep the answer small. */
-interface CatchUp {
-  chats: Array<{ chat: Chat; messages: Message[] }>;
-  truncated: boolean;
-}
+import { transcript } from '../render.js';
+import type { CatchUp } from '../shapes.js';
 
 interface CatchupOptions {
   chats?: number;

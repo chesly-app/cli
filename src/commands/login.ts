@@ -5,7 +5,8 @@ import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey } from '../api
 import { describeSource, storeKey, type KeyStore } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { Output, type Io } from '../output.js';
-import { scopeLabel, type Me } from './whoami.js';
+import { scopeLabel } from '../render.js';
+import type { Me } from '../shapes.js';
 
 /** `POST /v1/cli/sessions` (RFC 8628 §3.2), checked: `link` always carries the code. */
 interface CliSession {
