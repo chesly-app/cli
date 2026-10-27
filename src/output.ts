@@ -33,7 +33,7 @@ export class Output {
 
   /** The command's result: `data` exactly as JSON, or `human()` in a terminal. */
   result(data: unknown, human: () => string): void {
-    this.io.out(this.json ? `${JSON.stringify(data, null, 2)}\n` : withNewline(human()));
+    this.io.out(this.json ? `${toJson(data, 2)}\n` : withNewline(human()));
   }
 
   note(text: string): void {
@@ -60,9 +60,69 @@ export function formatTable(rows: ReadonlyArray<readonly string[]>): string {
 }
 
 /**
+ * JSON text in which the characters JSON leaves raw, but a terminal may act on, are escaped too: DEL,
+ * the C1 controls (an 8-bit CSI among them) and bidi overrides. It parses to the same value.
+ */
+function toJson(value: unknown, space?: number): string {
+  return (JSON.stringify(value, null, space) ?? 'null').replace(
+    /[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+}
+
+/** Every line of `text`, indented by `prefix`. */
+export function indent(text: string, prefix: string): string {
+  return text
+    .split('\n')
+    .map((line) => `${prefix}${line}`)
+    .join('\n');
+}
+
+/**
+ * Text that other people wrote (chat names, messages), safe to print in a terminal. Line breaks and
+ * tabs stay. Escape sequences, other control characters and bidi overrides go, so a message can't
+ * restyle the terminal, rewrite what is on screen or set the clipboard. JSON output escapes them
+ * instead (`toJson`).
+ */
+export function terminalSafe(text: string): string {
+  return text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '');
+}
+
+/** `terminalSafe` text on one line, cut to at most `max` characters with an ellipsis. */
+export function oneLine(text: string, max = Number.POSITIVE_INFINITY): string {
+  const flat = terminalSafe(text).replace(/\s+/g, ' ').trim();
+  const chars = Array.from(flat);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : flat;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * A time from the API, for people, in local time: `14:02` today, otherwise `Oct 24` this year or
+ * `2025-10-24` before it, followed by the time when `time` is set. Empty when there is none.
+ */
+export function formatWhen(iso: string | null | undefined, options: { time?: boolean; now?: Date } = {}): string {
+  const date = new Date(iso ?? '');
+  if (Number.isNaN(date.getTime())) return '';
+  const now = options.now ?? new Date();
+  const clock = `${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+  if (date.toDateString() === now.toDateString()) return clock;
+  const day =
+    date.getFullYear() === now.getFullYear()
+      ? `${MONTHS[date.getMonth()]} ${date.getDate()}`
+      : `${date.getFullYear()}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())}`;
+  return options.time ? `${day} ${clock}` : day;
+}
+
+function twoDigits(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/**
  * Prints `error` on stderr and returns the exit code to leave with. JSON mode prints one line of
  * problem details: an API error's exactly as the API sent them (`type`, `title`, `status`, `detail`,
- * `code`, `request_id`), and the CLI's own errors as `{ "type", "title", "code" }`.
+ * `code`, `request_id`), and the CLI's own errors as `{ "type", "title", "code" }` plus their extras
+ * (`candidates` for an ambiguous chat name).
  */
 export function reportError(error: unknown, io: Io, json: boolean): ExitCode {
   if (error instanceof CommanderError) {
@@ -71,7 +131,7 @@ export function reportError(error: unknown, io: Io, json: boolean): ExitCode {
   }
   const failure = describeFailure(error);
   if (json) {
-    io.err(`${JSON.stringify(failure.problem)}\n`);
+    io.err(`${toJson(failure.problem)}\n`);
   } else {
     const requestId = failure.requestId === undefined ? '' : ` (request ${failure.requestId})`;
     io.err(`Error: ${failure.message}${requestId}\n${failure.hint ? `${failure.hint}\n` : ''}`);
@@ -82,7 +142,7 @@ export function reportError(error: unknown, io: Io, json: boolean): ExitCode {
 /** Commander's usage errors, as one line of problem details in JSON mode. */
 export function formatUsageError(message: string, json: boolean): string {
   if (!json) return message;
-  return `${JSON.stringify(cliProblem('usage_error', message.replace(/^error:\s*/, '').trim()))}\n`;
+  return `${toJson(cliProblem('usage_error', message.replace(/^error:\s*/, '').trim()))}\n`;
 }
 
 function cliProblem(code: string, title: string): Record<string, unknown> {
@@ -108,7 +168,12 @@ function describeFailure(error: unknown): Failure {
     };
   }
   if (error instanceof CliError) {
-    return { message: error.message, exitCode: error.exitCode, problem: cliProblem(error.code, error.message) };
+    return {
+      message: error.message,
+      exitCode: error.exitCode,
+      problem: { ...cliProblem(error.code, error.message), ...error.extras },
+      hint: error.hint,
+    };
   }
   if (error instanceof CheslyNetworkError) {
     return { message: error.message, exitCode: EXIT.ERROR, problem: cliProblem('network_error', error.message) };

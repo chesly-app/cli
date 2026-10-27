@@ -219,7 +219,9 @@ describe('output and exit codes', () => {
 
     expect(await run(['--help'], cap.io)).toBe(0);
 
-    for (const command of ['login', 'logout', 'whoami', 'key']) expect(cap.stdout).toMatch(new RegExp(`^  ${command}\\b`, 'm'));
+    for (const command of ['login', 'logout', 'whoami', 'key', 'accounts', 'chats', 'read', 'search', 'catchup']) {
+      expect(cap.stdout).toMatch(new RegExp(`^  ${command}\\b`, 'm'));
+    }
     expect(cap.stdout).toContain('--json');
     expect(cap.stdout).toContain('CHESLY_API_KEY');
     expect(cap.stdout).toMatch(/3\s+not signed in/i);

@@ -1,11 +1,17 @@
 import { Command } from 'commander';
 import { VERSION } from './api.js';
+import { registerAccounts } from './commands/accounts.js';
+import { registerCatchup } from './commands/catchup.js';
+import { registerChats } from './commands/chats.js';
 import { registerKey } from './commands/key.js';
 import { registerLogin } from './commands/login.js';
 import { registerLogout } from './commands/logout.js';
+import { registerRead } from './commands/read.js';
+import { registerSearch } from './commands/search.js';
 import { registerWhoami } from './commands/whoami.js';
 import { EXIT } from './errors.js';
-import { formatUsageError, processIo, reportError, type Io } from './output.js';
+import { formatUsageError, indent, processIo, reportError, type Io } from './output.js';
+import { CHAT_ARGUMENT_HELP } from './resolve-chat.js';
 
 const HELP_FOOTER = `
 Signing in:
@@ -17,6 +23,9 @@ Output:
   Tables in a terminal. JSON when stdout is piped, or with --json: the API's
   JSON as is. Errors go to stderr, as one JSON line in JSON mode.
   Nothing ever prompts.
+
+Chats:
+${indent(CHAT_ARGUMENT_HELP, '  ')}
 
 Exit codes:
   0  ok
@@ -50,6 +59,11 @@ function buildProgram(io: Io, json: boolean): Command {
   registerLogout(program, io);
   registerWhoami(program, io);
   registerKey(program, io);
+  registerAccounts(program, io);
+  registerChats(program, io);
+  registerRead(program, io);
+  registerSearch(program, io);
+  registerCatchup(program, io);
   return program;
 }
 

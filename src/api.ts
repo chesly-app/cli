@@ -24,6 +24,8 @@ function apiBaseUrl(): string {
   return base;
 }
 
+type QueryValue = string | number | boolean | undefined;
+
 interface ApiRequestInit {
   /** Defaults to GET, or POST when there is a body. */
   method?: string;
@@ -31,6 +33,8 @@ interface ApiRequestInit {
   body?: unknown;
   /** Sent as `Authorization: Bearer <key>`. */
   key?: string;
+  /** The query string, in this order. Undefined values are left out. */
+  query?: Readonly<Record<string, QueryValue>>;
 }
 
 /**
@@ -90,7 +94,7 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
   if (init.key !== undefined && !isApiKey(init.key)) {
     throw new CliError('invalid_key_format', 'Refused to send an API key that is not well formed.', EXIT.NOT_SIGNED_IN);
   }
-  const url = `${apiBaseUrl()}${path}`;
+  const url = `${apiBaseUrl()}${path}${queryString(init.query)}`;
   const headers: Record<string, string> = { accept: 'application/json', 'user-agent': USER_AGENT };
   if (init.key !== undefined) headers.authorization = `Bearer ${init.key}`;
   let body: string | undefined;
@@ -125,6 +129,14 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     });
   }
   return parsed as T;
+}
+
+/** `?name=value&…`, percent-encoded (a space is %20), or nothing when every value is undefined. */
+function queryString(query: Readonly<Record<string, QueryValue>> = {}): string {
+  const pairs = Object.entries(query).flatMap(([name, value]) =>
+    value === undefined ? [] : [`${encodeURIComponent(name)}=${encodeURIComponent(String(value))}`],
+  );
+  return pairs.length === 0 ? '' : `?${pairs.join('&')}`;
 }
 
 function errorFromResponse(response: Response, body: unknown): CheslyApiError {

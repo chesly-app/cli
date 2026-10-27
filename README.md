@@ -4,17 +4,20 @@ Your chats from the terminal, for you and your agents. `chesly` is the command-l
 [Chesly](https://chesly.app) API. It is built for agents (Claude Code, Codex, OpenClaw) as much as
 for people: JSON when piped, stable exit codes, and it never prompts.
 
-Alpha: this release signs you in. Commands that read your chats come next.
+Alpha: sign in, then read your chats (accounts, chats, read, search and catch-up). Sending comes
+later.
 
 ## Install
 
-Until the npm release, install from the repo. You need Node 20 or later.
+For the alpha, install from the repo. You need Node 20 or later.
 
 ```sh
 git clone https://github.com/chesly-app/cli && cd cli
 npm install        # also builds dist/
 npm install -g .
 ```
+
+Once the repo is public, one line does it: `npm i -g github:chesly-app/cli`.
 
 ## Sign in
 
@@ -34,6 +37,16 @@ For CI and servers, set `CHESLY_API_KEY` instead. It wins over the stored key.
 `chesly logout` removes the key from this computer. The key itself keeps working until you revoke
 it in the Chesly dashboard.
 
+## Read your chats
+
+```sh
+chesly catchup                         # unread chats with their latest messages, in one call
+chesly chats --unread                  # chats with unread messages, most recent first
+chesly read "Mom"                      # a chat's latest messages, by name or chat ID
+chesly search "flight" --chat "Mom"    # search every chat, or one
+chesly accounts                        # your connected accounts and their status
+```
+
 ## Commands
 
 | Command | What it does |
@@ -42,8 +55,33 @@ it in the Chesly dashboard.
 | `chesly logout` | Removes the stored key from this computer |
 | `chesly whoami` | Shows the key in use: name, scope, API version, limits and usage (`GET /v1/me`) |
 | `chesly key [--reveal]` | Shows the key in use, masked (`ck_live_AbCd…WxYz`); `--reveal` prints the whole key and nothing else |
+| `chesly accounts` | Lists your connected chat accounts and their status (`GET /v1/accounts`) |
+| `chesly chats [--unread] [--account <id>] [--limit <n>] [--cursor <cursor>]` | Lists your chats, most recent first (`GET /v1/chats`) |
+| `chesly read <chat> [--limit <n>] [--cursor <cursor>]` | Shows a chat's latest messages, oldest first in a terminal (`GET /v1/chats/{chat_id}/messages`) |
+| `chesly search <query> [--chat <chat>] [--limit <n>]` | Searches your messages, in every chat or one (`GET /v1/messages/search`) |
+| `chesly catchup [--chats <n>] [--per-chat <n>]` | Your unread chats (not muted or archived) with their latest messages, in one call (`GET /v1/catch_up`) |
 
-Every command takes `--json`. `chesly <command> --help` explains each one.
+Every command takes `--json`. `chesly <command> --help` explains each one. `--limit` is 1 to 100.
+When there is more, JSON has a `next_cursor`, and the same command with `--cursor <next_cursor>`
+gets the next page (older messages, for `read`).
+
+### Chat names
+
+A `<chat>` is a chat ID (`chat_…`) or a name. A name is looked up across your chats, archived ones
+included:
+
+- an exact name wins, in any case (`mom` finds "Mom");
+- otherwise, the only partial match wins ("book" finds "Mom's book club");
+- no match exits 4 with `chat_not_found`;
+- several matches exit 4 with `ambiguous_chat`, listing the chats it could mean. In JSON mode they
+  are the `candidates`, as `/v1/chats` returns them:
+
+  ```json
+  {"type":"https://agents.chesly.app/docs/errors#ambiguous_chat","title":"\"Mom\" matches 2 chats. Use one of their chat IDs instead.","code":"ambiguous_chat","candidates":[{"id":"chat_…","name":"Mom","network":"whatsapp","type":"dm"},{"id":"chat_…","name":"MOM","network":"imessage","type":"dm"}]}
+  ```
+
+  (Each candidate has every chat field; this example shows four.) Run the command again with one of
+  their `id`s.
 
 ## For agents and scripts
 
@@ -51,7 +89,10 @@ Every command takes `--json`. `chesly <command> --help` explains each one.
   as is.
 - **Errors** go to stderr. In JSON mode each one is a single line of problem details. An API error
   prints exactly as the API sent it (`type`, `title`, `status`, `detail`, `code`, `request_id`).
-  The CLI's own errors print as `{"type":"https://agents.chesly.app/docs/errors#<code>","title":"...","code":"<code>"}`.
+  The CLI's own errors print as `{"type":"https://agents.chesly.app/docs/errors#<code>","title":"...","code":"<code>"}`,
+  plus their own fields (`candidates` for an ambiguous chat name).
+- **Other people's text** (names, messages) never reaches the terminal raw: tables drop escape
+  sequences and other control characters, and JSON escapes them, so the parsed text is exact.
 - **Keys** are checked before they are sent, stored or shown: `ck_live_` and 48 letters, digits,
   `_` or `-`. A malformed one exits 3 and is never printed.
 - **Nothing prompts**, ever.
@@ -63,7 +104,7 @@ Every command takes `--json`. `chesly <command> --help` explains each one.
   | 1 | error |
   | 2 | usage |
   | 3 | not signed in (no key, or the key was rejected) |
-  | 4 | not found or ambiguous |
+  | 4 | not found (an unknown chat ID, or a name that matches no chat), or ambiguous (a name that matches several) |
   | 5 | rate limited |
 
 - **MCP:** give Claude Code the Chesly MCP server with your key:
