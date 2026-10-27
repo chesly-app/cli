@@ -368,14 +368,19 @@ describe('in a terminal', () => {
   });
 
   it('search_lists_where_each_message_is', async () => {
-    serve({ '/v1/messages/search': () => json(200, { messages: [MESSAGES.messages[0]] }) });
+    const named = { ...MESSAGES.messages[0], chat_name: 'Family', network: 'whatsapp' };
+    const unnamed = { ...MESSAGES.messages[2], chat_name: null, network: 'whatsapp' };
+    const hostile = { ...MESSAGES.messages[1], chat_name: 'Fam\u001b]0;owned\u0007‮ily', network: 'whatsapp' };
+    serve({ '/v1/messages/search': () => json(200, { messages: [named, unnamed, hostile] }) });
     const cap = captureIo(true);
 
     expect(await run(['search', 'lunch'], cap.io)).toBe(0);
 
-    const [header, row] = cap.stdout.trimEnd().split('\n');
+    const [header, first, second] = cap.stdout.trimEnd().split('\n');
     expect(header).toMatch(/^WHEN\s+CHAT\s+FROM\s+MESSAGE$/);
-    expect(row).toMatch(new RegExp(`\\s${MOM.id}\\s+Mom\\s+Lunch at 1 then$`));
+    expect(first).toMatch(/\sFamily\s+Mom\s+Lunch at 1 then$/);
+    expect(second).toMatch(new RegExp(`\\s${MOM.id}\\s+Mom\\s+Are you coming on Sunday\\?$`));
+    expect(cap.stdout).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/);
 
     serve({ '/v1/messages/search': () => json(200, { messages: [] }) });
     const empty = captureIo(true);

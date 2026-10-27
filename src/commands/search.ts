@@ -34,7 +34,7 @@ Examples:
       if (q === '') throw new CliError('usage_error', 'Give the words to search for.', EXIT.USAGE);
       const chatId = options.chat === undefined ? undefined : await resolveChat(options.chat);
       const { key } = await requireKey();
-      const result = await apiRequest<{ messages: Message[] }>('/v1/messages/search', {
+      const result = await apiRequest<{ messages: SearchHit[] }>('/v1/messages/search', {
         key,
         query: { q, chat_id: chatId, limit: options.limit },
       });
@@ -44,15 +44,21 @@ Examples:
     });
 }
 
-/** One row per message, in the API's order, with the chat it is in. */
-function resultTable(messages: readonly Message[]): string {
+/** `GET /v1/messages/search` answers messages with the name and network of the chat each is in. */
+interface SearchHit extends Message {
+  chat_name: string | null;
+  network: string;
+}
+
+/** One row per message, in the API's order, with the chat it is in: its name, else its ID. */
+function resultTable(hits: readonly SearchHit[]): string {
   return formatTable([
     ['WHEN', 'CHAT', 'FROM', 'MESSAGE'],
-    ...messages.map((message) => [
-      formatWhen(message.sent_at, { time: true }),
-      message.chat_id,
-      senderLabel(message),
-      oneLine(messageText(message), 100),
+    ...hits.map((hit) => [
+      formatWhen(hit.sent_at, { time: true }),
+      oneLine(hit.chat_name ?? '', 30) || hit.chat_id,
+      senderLabel(hit),
+      oneLine(messageText(hit), 100),
     ]),
   ]);
 }
