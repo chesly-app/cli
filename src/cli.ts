@@ -4,7 +4,8 @@ import { registerKey } from './commands/key.js';
 import { registerLogin } from './commands/login.js';
 import { registerLogout } from './commands/logout.js';
 import { registerWhoami } from './commands/whoami.js';
-import { EXIT, formatUsageError, processIo, reportError, type Io } from './output.js';
+import { EXIT } from './errors.js';
+import { formatUsageError, processIo, reportError, type Io } from './output.js';
 
 const HELP_FOOTER = `
 Signing in:

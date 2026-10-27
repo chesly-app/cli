@@ -1,15 +1,27 @@
 import pkg from '../package.json' with { type: 'json' };
+import { CliError, EXIT, errorType } from './errors.js';
 
 export const VERSION: string = pkg.version;
 const DEFAULT_API_URL = 'https://api.chesly.app';
 
 const USER_AGENT = `chesly-cli/${VERSION} (node ${process.version}; ${process.platform} ${process.arch})`;
 const TIMEOUT_MS = 30_000;
+const KEY_FORMAT = /^ck_live_[A-Za-z0-9_-]{48}$/;
+
+/**
+ * A Chesly API key: `ck_live_` and 48 base64url characters. Every key is checked against this before
+ * it is sent, stored or shown, so a malformed value (a line break, a NUL) can't end up quoted in an error.
+ */
+export function isApiKey(value: unknown): value is string {
+  return typeof value === 'string' && KEY_FORMAT.test(value);
+}
 
 /** `CHESLY_API_URL` without a trailing slash, or https://api.chesly.app. */
 function apiBaseUrl(): string {
   const configured = process.env.CHESLY_API_URL?.trim();
-  return (configured || DEFAULT_API_URL).replace(/\/+$/, '');
+  const base = (configured || DEFAULT_API_URL).replace(/\/+$/, '');
+  if (!URL.canParse(base)) throw new CliError('invalid_api_url', 'CHESLY_API_URL is not a valid URL.');
+  return base;
 }
 
 interface ApiRequestInit {
@@ -34,8 +46,8 @@ export class CheslyApiError extends Error {
   readonly requestId: string | undefined;
   /** Seconds, from a Retry-After header. */
   readonly retryAfter: number | undefined;
-  /** The problem's other members, such as validation `errors`. */
-  readonly extensions: Record<string, unknown>;
+  /** What JSON mode prints: the API's problem details as received, or ones built from the answer. */
+  readonly problem: Record<string, unknown>;
 
   constructor(fields: {
     status: number;
@@ -44,7 +56,7 @@ export class CheslyApiError extends Error {
     detail?: string | undefined;
     requestId?: string | undefined;
     retryAfter?: number | undefined;
-    extensions?: Record<string, unknown>;
+    problem?: Record<string, unknown> | undefined;
   }) {
     super(fields.detail ?? fields.title);
     this.name = 'CheslyApiError';
@@ -54,22 +66,33 @@ export class CheslyApiError extends Error {
     this.detail = fields.detail;
     this.requestId = fields.requestId;
     this.retryAfter = fields.retryAfter;
-    this.extensions = fields.extensions ?? {};
+    this.problem = fields.problem ?? {
+      type: errorType(fields.code),
+      title: fields.title,
+      status: fields.status,
+      ...(fields.detail === undefined ? {} : { detail: fields.detail }),
+      code: fields.code,
+      ...(fields.requestId === undefined ? {} : { request_id: fields.requestId }),
+    };
   }
 }
 
 /** The request got no HTTP answer: DNS, a refused connection, a dropped connection or a timeout. */
 export class CheslyNetworkError extends Error {
   constructor(url: string, cause: unknown) {
-    super(`Couldn't reach ${originOf(url)}: ${innermostMessage(cause)}`, { cause });
+    // No `cause` attached: fetch's own errors can quote header values, the key among them.
+    super(`Couldn't reach ${new URL(url).origin}: ${networkReason(cause)}`);
     this.name = 'CheslyNetworkError';
   }
 }
 
 export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+  if (init.key !== undefined && !isApiKey(init.key)) {
+    throw new CliError('invalid_key_format', 'Refused to send an API key that is not well formed.', EXIT.NOT_SIGNED_IN);
+  }
   const url = `${apiBaseUrl()}${path}`;
   const headers: Record<string, string> = { accept: 'application/json', 'user-agent': USER_AGENT };
-  if (init.key) headers.authorization = `Bearer ${init.key}`;
+  if (init.key !== undefined) headers.authorization = `Bearer ${init.key}`;
   let body: string | undefined;
   if (init.body !== undefined) {
     headers['content-type'] = 'application/json';
@@ -105,25 +128,17 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
 }
 
 function errorFromResponse(response: Response, body: unknown): CheslyApiError {
-  const {
-    type: _type,
-    title,
-    status: _status,
-    detail,
-    code,
-    request_id: requestId,
-    error,
-    error_description: errorDescription,
-    ...extensions
-  } = isRecord(body) ? body : {};
+  const fields = isRecord(body) ? body : {};
+  const code = nonEmpty(fields.code) ?? nonEmpty(fields.error) ?? `http_${response.status}`;
   return new CheslyApiError({
     status: response.status,
-    code: nonEmpty(code) ?? nonEmpty(error) ?? `http_${response.status}`,
-    title: nonEmpty(title) ?? nonEmpty(errorDescription) ?? (response.statusText || `HTTP ${response.status}`),
-    detail: nonEmpty(detail),
-    requestId: nonEmpty(requestId) ?? response.headers.get('x-request-id') ?? undefined,
+    code,
+    title: nonEmpty(fields.title) ?? nonEmpty(fields.error_description) ?? (response.statusText || `HTTP ${response.status}`),
+    detail: nonEmpty(fields.detail),
+    requestId: nonEmpty(fields.request_id) ?? response.headers.get('x-request-id') ?? undefined,
     retryAfter: retryAfterSeconds(response.headers.get('retry-after')),
-    extensions,
+    // Problem details are printed exactly as received; anything else gets problem details built for it.
+    problem: nonEmpty(fields.code) === undefined ? undefined : fields,
   });
 }
 
@@ -152,19 +167,19 @@ function nonEmpty(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 }
 
-function originOf(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return url;
-  }
-}
-
-/** fetch wraps the useful reason ("getaddrinfo ENOTFOUND …") in a generic "fetch failed". */
-function innermostMessage(error: unknown): string {
+/**
+ * Why a request got no answer, for people. Only errors with a system or TLS code (ECONNREFUSED,
+ * ENOTFOUND, UND_ERR_CONNECT_TIMEOUT, CERT_HAS_EXPIRED…) are quoted: their messages name the host and
+ * the system call. Anything else, such as fetch's TypeError about a header, is never repeated.
+ */
+function networkReason(error: unknown): string {
   let current = error;
   for (let depth = 0; depth < 5 && current instanceof Error && current.cause !== undefined; depth++) {
     current = current.cause;
   }
-  return current instanceof Error ? current.message : String(current);
+  if (current instanceof Error && (current.name === 'TimeoutError' || current.name === 'AbortError')) {
+    return `no answer within ${TIMEOUT_MS / 1000} s`;
+  }
+  if (current instanceof Error && typeof (current as NodeJS.ErrnoException).code === 'string') return current.message;
+  return 'the request failed before it reached the API';
 }

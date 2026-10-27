@@ -94,13 +94,13 @@ export function json(status: number, body: unknown, headers: Record<string, stri
   });
 }
 
-export function problem(
+/** An API problem details body, as the API sends it. */
+export function problemBody(
   status: number,
   code: string,
   extra: { title?: string; detail?: string; request_id?: string } = {},
-  headers: Record<string, string> = {},
-): Response {
-  const body = {
+): Record<string, unknown> {
+  return {
     type: `https://agents.chesly.app/docs/errors#${code}`,
     title: extra.title ?? code,
     status,
@@ -108,10 +108,28 @@ export function problem(
     code,
     request_id: extra.request_id ?? 'req_test',
   };
-  return new Response(JSON.stringify(body), {
+}
+
+export function problem(
+  status: number,
+  code: string,
+  extra: { title?: string; detail?: string; request_id?: string } = {},
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(problemBody(status, code, extra)), {
     status,
     headers: { 'content-type': 'application/problem+json', ...headers },
   });
+}
+
+/** What JSON mode prints for an error the CLI finds itself. */
+export function cliProblem(code: string, title: string): Record<string, unknown> {
+  return { type: `https://agents.chesly.app/docs/errors#${code}`, title, code };
+}
+
+/** The last line of stderr: where JSON mode puts the error, after any sign-in instructions. */
+export function lastLine(text: string): string {
+  return text.trim().split('\n').at(-1) ?? '';
 }
 
 /**
@@ -148,6 +166,11 @@ export function writeCredentials(home: string, apiKey: string): void {
 
 /** A well-formed key whose first 12 and last 4 characters are easy to spot. */
 export const KEY = `ck_live_Ab3d${'x'.repeat(40)}WxYz`;
+
+/** Another well-formed key (`ck_live_` and 48 characters) that starts with `tag`. */
+export function keyFor(tag: string): string {
+  return `ck_live_${tag}${'x'.repeat(48 - tag.length)}`;
+}
 
 export const ME = {
   key: { id: 'key_1', name: 'Chesly CLI on test-host', scope: 'full', api_version: '2026-11-01' },

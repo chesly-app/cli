@@ -49,9 +49,11 @@ Every command takes `--json`. `chesly <command> --help` explains each one.
 
 - **Output:** tables in a terminal. When stdout is piped, or with `--json`, it prints the API's JSON
   as is.
-- **Errors** go to stderr. In JSON mode each one is a single line:
-  `{"error":"<code>","message":"...","status":404,"request_id":"..."}`. API errors carry the
-  problem's `code` and `request_id`.
+- **Errors** go to stderr. In JSON mode each one is a single line of problem details. An API error
+  prints exactly as the API sent it (`type`, `title`, `status`, `detail`, `code`, `request_id`).
+  The CLI's own errors print as `{"type":"https://agents.chesly.app/docs/errors#<code>","title":"...","code":"<code>"}`.
+- **Keys** are checked before they are sent, stored or shown: `ck_live_` and 48 letters, digits,
+  `_` or `-`. A malformed one exits 3 and is never printed.
 - **Nothing prompts**, ever.
 - **Exit codes:**
 
@@ -62,7 +64,7 @@ Every command takes `--json`. `chesly <command> --help` explains each one.
   | 2 | usage |
   | 3 | not signed in (no key, or the key was rejected) |
   | 4 | not found or ambiguous |
-  | 5 | rate limited (see `retry_after`) |
+  | 5 | rate limited |
 
 - **MCP:** give Claude Code the Chesly MCP server with your key:
 

@@ -1,5 +1,6 @@
 import { CommanderError } from 'commander';
 import { CheslyApiError, CheslyNetworkError } from './api.js';
+import { CliError, EXIT, errorType, type ExitCode } from './errors.js';
 
 /** Where a run writes. `isTTY` says whether stdout is a terminal. */
 export interface Io {
@@ -14,30 +15,6 @@ export function processIo(): Io {
     err: (text) => void process.stderr.write(text),
     isTTY: process.stdout.isTTY === true,
   };
-}
-
-/** Stable exit codes: agents and scripts branch on them. */
-export const EXIT = {
-  OK: 0,
-  ERROR: 1,
-  USAGE: 2,
-  NOT_SIGNED_IN: 3,
-  NOT_FOUND: 4,
-  RATE_LIMITED: 5,
-} as const;
-
-type ExitCode = (typeof EXIT)[keyof typeof EXIT];
-
-/** A failure the CLI finds itself, with a stable `code` for JSON output and the exit code to leave with. */
-export class CliError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly exitCode: ExitCode = EXIT.ERROR,
-  ) {
-    super(message);
-    this.name = 'CliError';
-  }
 }
 
 /**
@@ -83,8 +60,9 @@ export function formatTable(rows: ReadonlyArray<readonly string[]>): string {
 }
 
 /**
- * Prints `error` on stderr and returns the exit code to leave with. In JSON mode the error is one line:
- * `{"error": "<code>", "message": "...", ...}`, with the API's status, request_id and problem extensions.
+ * Prints `error` on stderr and returns the exit code to leave with. JSON mode prints one line of
+ * problem details: an API error's exactly as the API sent them (`type`, `title`, `status`, `detail`,
+ * `code`, `request_id`), and the CLI's own errors as `{ "type", "title", "code" }`.
  */
 export function reportError(error: unknown, io: Io, json: boolean): ExitCode {
   if (error instanceof CommanderError) {
@@ -93,54 +71,50 @@ export function reportError(error: unknown, io: Io, json: boolean): ExitCode {
   }
   const failure = describeFailure(error);
   if (json) {
-    // `error` and `message` lead, and a problem extension of the same name can't replace them.
-    const line: Record<string, unknown> = { error: failure.code, message: failure.message, ...failure.fields };
-    line.error = failure.code;
-    line.message = failure.message;
-    io.err(`${JSON.stringify(line)}\n`);
+    io.err(`${JSON.stringify(failure.problem)}\n`);
   } else {
-    const requestId = typeof failure.fields.request_id === 'string' ? ` (request ${failure.fields.request_id})` : '';
+    const requestId = failure.requestId === undefined ? '' : ` (request ${failure.requestId})`;
     io.err(`Error: ${failure.message}${requestId}\n${failure.hint ? `${failure.hint}\n` : ''}`);
   }
   return failure.exitCode;
 }
 
-/** Commander's usage errors, as one JSON line in JSON mode. */
+/** Commander's usage errors, as one line of problem details in JSON mode. */
 export function formatUsageError(message: string, json: boolean): string {
   if (!json) return message;
-  const text = message.replace(/^error:\s*/, '').trim();
-  return `${JSON.stringify({ error: 'usage_error', message: text, hint: 'Run chesly --help for usage.' })}\n`;
+  return `${JSON.stringify(cliProblem('usage_error', message.replace(/^error:\s*/, '').trim()))}\n`;
+}
+
+function cliProblem(code: string, title: string): Record<string, unknown> {
+  return { type: errorType(code), title, code };
 }
 
 interface Failure {
-  code: string;
   message: string;
   exitCode: ExitCode;
-  hint?: string;
-  fields: Record<string, unknown>;
+  problem: Record<string, unknown>;
+  requestId?: string | undefined;
+  hint?: string | undefined;
 }
 
 function describeFailure(error: unknown): Failure {
-  if (error instanceof CliError) {
-    return { code: error.code, message: error.message, exitCode: error.exitCode, fields: {} };
-  }
   if (error instanceof CheslyApiError) {
-    const fields: Record<string, unknown> = { ...error.extensions, status: error.status };
-    if (error.requestId !== undefined) fields.request_id = error.requestId;
-    if (error.retryAfter !== undefined) fields.retry_after = error.retryAfter;
     return {
-      code: error.code,
       message: error.message,
       exitCode: exitCodeForStatus(error.status),
+      problem: error.problem,
+      requestId: error.requestId,
       hint: hintFor(error),
-      fields,
     };
   }
-  if (error instanceof CheslyNetworkError) {
-    return { code: 'network_error', message: error.message, exitCode: EXIT.ERROR, fields: {} };
+  if (error instanceof CliError) {
+    return { message: error.message, exitCode: error.exitCode, problem: cliProblem(error.code, error.message) };
   }
-  const message = error instanceof Error ? error.message : String(error);
-  return { code: 'internal_error', message: `Unexpected error: ${message}`, exitCode: EXIT.ERROR, fields: {} };
+  if (error instanceof CheslyNetworkError) {
+    return { message: error.message, exitCode: EXIT.ERROR, problem: cliProblem('network_error', error.message) };
+  }
+  const message = `Unexpected error: ${error instanceof Error ? error.message : String(error)}`;
+  return { message, exitCode: EXIT.ERROR, problem: cliProblem('internal_error', message) };
 }
 
 function exitCodeForStatus(status: number): ExitCode {

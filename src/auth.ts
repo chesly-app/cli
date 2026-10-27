@@ -1,8 +1,9 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { isApiKey } from './api.js';
+import { CliError, EXIT } from './errors.js';
 import { openKeychain } from './keychain.js';
-import { CliError, EXIT } from './output.js';
 
 /** Where the key in use came from. */
 export type KeySource = 'env' | 'keychain' | 'file';
@@ -21,12 +22,27 @@ export async function resolveKey(): Promise<string | null> {
 
 async function findKey(): Promise<{ key: string; source: KeySource } | null> {
   const fromEnv = process.env.CHESLY_API_KEY?.trim();
-  if (fromEnv) return { key: fromEnv, source: 'env' };
+  if (fromEnv) return { key: wellFormed(fromEnv, 'env'), source: 'env' };
   const fromKeychain = await readKeychain();
-  if (fromKeychain) return { key: fromKeychain, source: 'keychain' };
+  if (fromKeychain) return { key: wellFormed(fromKeychain, 'keychain'), source: 'keychain' };
   const fromFile = await readCredentialsFile();
-  if (fromFile) return { key: fromFile, source: 'file' };
+  if (fromFile) return { key: wellFormed(fromFile, 'file'), source: 'file' };
   return null;
+}
+
+/**
+ * A found key that isn't `ck_live_` and 48 base64url characters stops here, before it can be sent:
+ * fetch would reject a line break in the header with an error that quotes it. The message never does.
+ */
+function wellFormed(key: string, source: KeySource): string {
+  if (isApiKey(key)) return key;
+  throw new CliError(
+    'invalid_key_format',
+    source === 'env'
+      ? 'CHESLY_API_KEY is not a Chesly API key (ck_live_ and 48 letters, digits, _ or -). Fix or unset it.'
+      : `The key stored in ${describeSource(source)} is not a Chesly API key. Run \`chesly login\` again.`,
+    EXIT.NOT_SIGNED_IN,
+  );
 }
 
 export async function requireKey(): Promise<{ key: string; source: KeySource }> {
@@ -39,6 +55,7 @@ export async function requireKey(): Promise<{ key: string; source: KeySource }> 
 
 /** Stores the key in the OS keychain, or in the credentials file (0600) where there is none. */
 export async function storeKey(key: string): Promise<KeyStore> {
+  if (!isApiKey(key)) throw new CliError('invalid_key_format', 'Refused to store an API key that is not well formed.');
   const keychain = await openKeychain();
   if (keychain) {
     const stored = await keychain.set(key).then(

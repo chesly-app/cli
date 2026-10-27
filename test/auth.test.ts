@@ -12,12 +12,16 @@ import {
   KEY,
   ME,
   captureIo,
+  cliProblem,
   credentialsFile,
   isolateEnv,
   json,
+  keyFor,
   keychain,
+  lastLine,
   mockFetch,
   problem,
+  problemBody,
   writeCredentials,
 } from './helpers.js';
 
@@ -67,7 +71,8 @@ describe('chesly login', () => {
 
     expect(keychain.value).toBeNull();
     expect(existsSync(credentialsFile(env.home))).toBe(false);
-    expect(JSON.parse(cap.stderr)).toMatchObject({ error: 'invalid_api_key' });
+    // JSON mode prints the API's problem exactly as received.
+    expect(JSON.parse(cap.stderr)).toEqual(problemBody(401, 'invalid_api_key', { title: 'Invalid API key' }));
   });
 
   it('login_refuses_something_that_is_not_a_key', async () => {
@@ -174,8 +179,89 @@ describe('chesly login', () => {
     expect(await exit).toBe(1);
 
     expect(keychain.value).toBeNull();
-    // The sign-in instructions come first on stderr; the error is its last line.
-    expect(JSON.parse(cap.stderr.trim().split('\n').at(-1) ?? '')).toMatchObject({ error: 'access_denied' });
+    expect(JSON.parse(lastLine(cap.stderr))).toEqual(
+      cliProblem('access_denied', 'The sign-in was denied on web.chesly.app. Nothing was stored.'),
+    );
+  });
+
+  it('device_login_never_shows_the_bare_page_link', async () => {
+    // Without the code in it, the link lands on "This code has expired". No link with the code is an error.
+    vi.useFakeTimers();
+    for (const session of [
+      { ...SESSION, verification_uri_complete: undefined, verification_uri: undefined },
+      { ...SESSION, verification_uri_complete: undefined, verification_uri: 'not a link' },
+    ]) {
+      const calls = mockFetch((call) => (call.url.endsWith('/v1/cli/sessions') ? json(200, session) : json(200, ME)));
+      const cap = captureIo();
+
+      const exit = run(['login'], cap.io);
+      await vi.runAllTimersAsync();
+      expect(await exit).toBe(1);
+
+      expect(JSON.parse(lastLine(cap.stderr))).toMatchObject({ code: 'invalid_response' });
+      expect(cap.stderr).not.toContain('undefined');
+      expect(cap.stderr).not.toContain('not a link');
+      expect(calls.filter((call) => call.url.endsWith('/token'))).toHaveLength(0);
+    }
+  });
+
+  it('device_login_stores_nothing_without_a_valid_key', async () => {
+    vi.useFakeTimers();
+    for (const token of [{ token_type: 'Bearer' }, { api_key: 'ck_live_short', token_type: 'Bearer' }]) {
+      mockFetch((call) => {
+        if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+        if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, token);
+        return json(200, ME);
+      });
+      const cap = captureIo(true);
+
+      const exit = run(['login'], cap.io);
+      await vi.runAllTimersAsync();
+      expect(await exit).toBe(1);
+
+      expect(keychain.value).toBeNull();
+      expect(cap.stdout).toBe('');
+      expect(cap.stderr).not.toMatch(/signed in/i);
+      expect(cap.stderr).not.toContain('ck_live_short');
+    }
+  });
+
+  it('device_login_fails_when_the_new_key_is_rejected', async () => {
+    vi.useFakeTimers();
+    mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      return problem(401, 'invalid_api_key', { title: 'Invalid API key' });
+    });
+    const cap = captureIo();
+
+    const exit = run(['login'], cap.io);
+    await vi.runAllTimersAsync();
+    expect(await exit).toBe(3);
+
+    expect(keychain.value).toBeNull();
+    expect(existsSync(credentialsFile(env.home))).toBe(false);
+    expect(cap.stdout).toBe('');
+    expect(cap.stderr).not.toMatch(/signed in/i);
+    expect(JSON.parse(lastLine(cap.stderr))).toEqual(problemBody(401, 'invalid_api_key', { title: 'Invalid API key' }));
+  });
+
+  it('device_login_keeps_the_key_when_only_its_details_fail_to_load', async () => {
+    // The server hands a key out once: a 503 on /v1/me right after must not lose it.
+    vi.useFakeTimers();
+    mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      return problem(503, 'unavailable');
+    });
+    const cap = captureIo();
+
+    const exit = run(['login'], cap.io);
+    await vi.runAllTimersAsync();
+    expect(await exit).toBe(0);
+
+    expect(keychain.value).toBe(KEY);
+    expect(cap.stderr).toMatch(/signed in/i);
   });
 
   it('stores_the_key_in_a_0600_file_without_a_keychain', async () => {
@@ -193,16 +279,16 @@ describe('chesly login', () => {
 
 describe('resolveKey', () => {
   it('env_key_wins', async () => {
-    keychain.value = 'ck_live_from_the_keychain';
-    writeCredentials(env.home, 'ck_live_from_the_file');
-    vi.stubEnv('CHESLY_API_KEY', 'ck_live_from_the_env');
-    expect(await resolveKey()).toBe('ck_live_from_the_env');
+    keychain.value = keyFor('keychain');
+    writeCredentials(env.home, keyFor('file'));
+    vi.stubEnv('CHESLY_API_KEY', keyFor('env'));
+    expect(await resolveKey()).toBe(keyFor('env'));
 
     vi.stubEnv('CHESLY_API_KEY', '');
-    expect(await resolveKey()).toBe('ck_live_from_the_keychain');
+    expect(await resolveKey()).toBe(keyFor('keychain'));
 
     keychain.value = null;
-    expect(await resolveKey()).toBe('ck_live_from_the_file');
+    expect(await resolveKey()).toBe(keyFor('file'));
   });
 
   it('exit_code_3_without_a_key', async () => {
@@ -213,11 +299,49 @@ describe('resolveKey', () => {
 
     expect(calls).toHaveLength(0);
     expect(piped.stdout).toBe('');
-    expect(JSON.parse(piped.stderr)).toMatchObject({ error: 'not_signed_in' });
+    expect(JSON.parse(piped.stderr)).toEqual(
+      cliProblem('not_signed_in', 'Not signed in. Run `chesly login`, or set CHESLY_API_KEY.'),
+    );
 
     const terminal = captureIo(true);
     expect(await run(['whoami'], terminal.io)).toBe(3);
     expect(terminal.stderr).toContain('chesly login');
+  });
+});
+
+describe('malformed keys', () => {
+  it('a_key_with_a_line_break_is_refused_and_never_printed', async () => {
+    // fetch would reject the header with an error that quotes it, key and all.
+    vi.stubEnv('CHESLY_API_KEY', `${keyFor('SECRET')}\r\nsecond-line`);
+    const calls = mockFetch(() => json(200, ME));
+
+    for (const argv of [['whoami'], ['key', '--reveal'], ['key']]) {
+      for (const isTTY of [false, true]) {
+        const cap = captureIo(isTTY);
+        expect(await run(argv, cap.io)).toBe(3);
+        expect(cap.stdout + cap.stderr).not.toContain('SECRET');
+        expect(cap.stdout + cap.stderr).not.toContain('second-line');
+      }
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a_stored_key_with_a_control_character_is_refused_and_never_printed', async () => {
+    const calls = mockFetch(() => json(200, ME));
+
+    keychain.value = `ck_live_SECRET\r${'x'.repeat(41)}`;
+    const fromKeychain = captureIo();
+    expect(await run(['whoami'], fromKeychain.io)).toBe(3);
+    expect(fromKeychain.stdout + fromKeychain.stderr).not.toContain('SECRET');
+    expect(JSON.parse(fromKeychain.stderr)).toMatchObject({ code: 'invalid_key_format' });
+
+    keychain.available = false;
+    writeCredentials(env.home, `ck_live_SECRET\u0000${'x'.repeat(41)}`);
+    const fromFile = captureIo(true);
+    expect(await run(['whoami'], fromFile.io)).toBe(3);
+    expect(fromFile.stdout + fromFile.stderr).not.toContain('SECRET');
+
+    expect(calls).toHaveLength(0);
   });
 });
 

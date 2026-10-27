@@ -1,28 +1,20 @@
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import type { Command } from 'commander';
-import { CheslyApiError, CheslyNetworkError, apiRequest } from '../api.js';
+import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey } from '../api.js';
 import { describeSource, storeKey, type KeyStore } from '../auth.js';
-import { CliError, EXIT, Output, type Io } from '../output.js';
+import { CliError, EXIT } from '../errors.js';
+import { Output, type Io } from '../output.js';
 import { scopeLabel, type Me } from './whoami.js';
 
-/** `POST /v1/cli/sessions`: the device authorization response of RFC 8628 §3.2. */
+/** `POST /v1/cli/sessions` (RFC 8628 §3.2), checked: `link` always carries the code. */
 interface CliSession {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  verification_uri_complete?: string;
-  expires_in: number;
-  interval?: number;
+  deviceCode: string;
+  userCode: string;
+  link: string;
+  expiresIn: number;
+  interval: number;
 }
-
-/** `POST /v1/cli/sessions/token` once the code is approved. */
-interface CliToken {
-  api_key: string;
-  token_type: string;
-}
-
-const KEY_FORMAT = /^ck_[a-z]+_[A-Za-z0-9_-]+$/;
 
 export function registerLogin(program: Command, io: Io): void {
   program
@@ -51,48 +43,66 @@ Examples:
 }
 
 async function loginWithKey(out: Output, key: string): Promise<void> {
-  if (!KEY_FORMAT.test(key)) {
-    throw new CliError('invalid_key_format', 'That is not a Chesly API key. Keys start with ck_live_.', EXIT.USAGE);
+  if (!isApiKey(key)) {
+    throw new CliError(
+      'invalid_key_format',
+      'That is not a Chesly API key: ck_live_ and 48 letters, digits, _ or -.',
+      EXIT.USAGE,
+    );
   }
   // A rejected key (401) throws here, before anything is stored.
   const me = await apiRequest<Me>('/v1/me', { key });
-  const store = await storeKey(key);
-  signedIn(out, store, me);
+  signedIn(out, await storeKey(key), me);
 }
 
+/**
+ * The new key is checked with GET /v1/me before it is stored, as with --key, so a rejected key fails
+ * the sign-in. Only when the check can't run (a network blip, a 5xx, a 429) is the key stored
+ * unchecked: the server hands each key out once, and dropping it would orphan it.
+ */
 async function loginInBrowser(out: Output): Promise<void> {
   const key = await approveInBrowser(out);
-  // Store first: the server hands the key out once, so it must never be lost to a later failure.
-  const store = await storeKey(key);
-  const me = await apiRequest<Me>('/v1/me', { key }).catch(() => undefined);
-  signedIn(out, store, me);
+  let me: Me;
+  try {
+    me = await apiRequest<Me>('/v1/me', { key });
+  } catch (error) {
+    if (!checkCouldNotRun(error)) throw error;
+    const store = await storeKey(key);
+    out.note(`Signed in, and saved the key in ${describeSource(store)}. Its details didn't load: ${error.message}`);
+    noteEnvKey(out);
+    return;
+  }
+  signedIn(out, await storeKey(key), me);
 }
 
-/** The device flow: show the code, then poll until it is approved, denied or expired (RFC 8628 §3.4-3.5). */
+function checkCouldNotRun(error: unknown): error is CheslyNetworkError | CheslyApiError {
+  if (error instanceof CheslyNetworkError) return true;
+  return error instanceof CheslyApiError && (error.status >= 500 || error.status === 429);
+}
+
+/** The device flow: show the link, then poll until the code is approved, denied or expired (RFC 8628 §3.4-3.5). */
 async function approveInBrowser(out: Output): Promise<string> {
-  const session = await apiRequest<CliSession>('/v1/cli/sessions', {
-    method: 'POST',
-    body: { client_name: hostname() },
-  });
-  const link = approvalLink(session);
-  out.note(`To sign in, open this link:\n\n  ${link}\n\nApprove it if the page shows the code ${session.user_code}.`);
+  const session = checkSession(
+    await apiRequest<unknown>('/v1/cli/sessions', { method: 'POST', body: { client_name: hostname() } }),
+  );
+  out.note(`To sign in, open this link:\n\n  ${session.link}\n\nApprove it if the page shows the code ${session.userCode}.`);
   out.note(
-    out.io.isTTY && openBrowser(link)
+    out.io.isTTY && openBrowser(session.link)
       ? 'Opened your browser. Waiting for approval… (Ctrl+C to cancel)'
       : 'Waiting for approval… (Ctrl+C to cancel)',
   );
 
-  let interval = positiveOr(session.interval, 5);
-  const expiresAt = Date.now() + positiveOr(session.expires_in, 600) * 1000;
+  let interval = session.interval;
+  const expiresAt = Date.now() + session.expiresIn * 1000;
   for (;;) {
     await sleep(interval * 1000);
     if (Date.now() >= expiresAt) throw expired();
+    let token: { api_key?: unknown } | undefined;
     try {
-      const token = await apiRequest<CliToken>('/v1/cli/sessions/token', {
+      token = await apiRequest<{ api_key?: unknown }>('/v1/cli/sessions/token', {
         method: 'POST',
-        body: { device_code: session.device_code },
+        body: { device_code: session.deviceCode },
       });
-      return token.api_key;
     } catch (error) {
       if (error instanceof CheslyApiError) {
         if (error.code === 'authorization_pending') continue;
@@ -114,28 +124,57 @@ async function approveInBrowser(out: Output): Promise<string> {
       }
       throw error;
     }
+    const apiKey = token?.api_key;
+    if (!isApiKey(apiKey)) {
+      throw badAnswer('The sign-in was approved, but the API sent no valid key. Nothing was stored; run `chesly login` again.');
+    }
+    return apiKey;
   }
 }
 
-function signedIn(out: Output, store: KeyStore, me: Me | undefined): void {
-  const saved = `Saved it in ${describeSource(store)}.`;
-  if (me) out.result(me, () => `Signed in with the key "${me.key?.name}" (${scopeLabel(me.key?.scope)}).\n${saved}`);
-  else out.note(`Signed in. ${saved}`);
+/** The answer to `POST /v1/cli/sessions`, checked before anything is shown. */
+function checkSession(answer: unknown): CliSession {
+  const fields = (typeof answer === 'object' && answer !== null ? answer : {}) as Record<string, unknown>;
+  const { device_code: deviceCode, user_code: userCode } = fields;
+  if (typeof deviceCode !== 'string' || deviceCode === '' || typeof userCode !== 'string' || userCode === '') {
+    throw badAnswer('The API did not start a sign-in. Run `chesly login` again.');
+  }
+  return {
+    deviceCode,
+    userCode,
+    link: approvalLink(fields.verification_uri_complete, fields.verification_uri, userCode),
+    expiresIn: positiveOr(fields.expires_in, 600),
+    interval: positiveOr(fields.interval, 5),
+  };
+}
+
+/** The approval page has no form to type a code into: the link must carry the code, never the bare page. */
+function approvalLink(complete: unknown, page: unknown, userCode: string): string {
+  if (typeof complete === 'string' && URL.canParse(complete)) return complete;
+  if (typeof page === 'string' && URL.canParse(page)) {
+    const url = new URL(page);
+    url.searchParams.set('code', userCode);
+    return url.toString();
+  }
+  throw badAnswer('The API sent no sign-in link. Run `chesly login` again.');
+}
+
+function signedIn(out: Output, store: KeyStore, me: Me): void {
+  out.result(
+    me,
+    () => `Signed in with the key "${me.key?.name}" (${scopeLabel(me.key?.scope)}).\nSaved it in ${describeSource(store)}.`,
+  );
+  noteEnvKey(out);
+}
+
+function noteEnvKey(out: Output): void {
   if (process.env.CHESLY_API_KEY?.trim()) {
     out.note('Note: CHESLY_API_KEY is set in your environment and wins over the stored key until you unset it.');
   }
 }
 
-/** The approval page has no form to type a code into, so the link it opens must carry the code. */
-function approvalLink(session: CliSession): string {
-  if (session.verification_uri_complete) return session.verification_uri_complete;
-  try {
-    const url = new URL(session.verification_uri);
-    url.searchParams.set('code', session.user_code);
-    return url.toString();
-  } catch {
-    return session.verification_uri;
-  }
+function badAnswer(message: string): CliError {
+  return new CliError('invalid_response', message);
 }
 
 function expired(): CliError {

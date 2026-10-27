@@ -5,7 +5,19 @@ vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./help
 
 import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
-import { KEY, ME, captureIo, isolateEnv, json, keychain, mockFetch, problem } from './helpers.js';
+import {
+  KEY,
+  ME,
+  captureIo,
+  cliProblem,
+  isolateEnv,
+  json,
+  keyFor,
+  keychain,
+  mockFetch,
+  problem,
+  problemBody,
+} from './helpers.js';
 
 let env: ReturnType<typeof isolateEnv>;
 
@@ -66,6 +78,16 @@ describe('apiRequest', () => {
     expect(error).toMatchObject({ status: 400, code: 'slow_down' });
   });
 
+  it('refuses_to_send_a_malformed_key', async () => {
+    const calls = mockFetch(() => json(200, ME));
+
+    const error = await apiRequest('/v1/me', { key: `${keyFor('SECRET')}\r\nx` }).catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ code: 'invalid_key_format' });
+    expect((error as Error).message).not.toContain('SECRET');
+    expect(calls).toHaveLength(0);
+  });
+
   it('posts_json_and_defaults_to_api_chesly_app', async () => {
     vi.stubEnv('CHESLY_API_URL', '');
     const calls = mockFetch(() => json(200, { ok: true }));
@@ -116,11 +138,38 @@ describe('output and exit codes', () => {
     expect(await run(['whoami'], cap.io)).toBe(exitCode);
 
     expect(cap.stdout).toBe('');
-    expect(JSON.parse(cap.stderr)).toMatchObject({ error: code, status, request_id: 'req_xyz' });
+    // The API's problem exactly as received: type, title, status, code, request_id.
+    expect(JSON.parse(cap.stderr)).toEqual(problemBody(status, code, { request_id: 'req_xyz' }));
+  });
+
+  it('an_error_body_that_is_not_a_problem_prints_as_one', async () => {
+    vi.stubEnv('CHESLY_API_KEY', KEY);
+    mockFetch(
+      () =>
+        new Response('<html>Bad Gateway</html>', {
+          status: 502,
+          statusText: 'Bad Gateway',
+          headers: { 'content-type': 'text/html', 'x-request-id': 'req_gw' },
+        }),
+    );
+    const cap = captureIo();
+
+    expect(await run(['whoami'], cap.io)).toBe(1);
+
+    expect(JSON.parse(cap.stderr)).toEqual({
+      type: 'https://agents.chesly.app/docs/errors#http_502',
+      title: 'Bad Gateway',
+      status: 502,
+      code: 'http_502',
+      request_id: 'req_gw',
+    });
   });
 
   it('usage_errors_exit_2', async () => {
-    expect(await run(['whoami', '--bogus'], captureIo().io)).toBe(2);
+    const piped = captureIo();
+    expect(await run(['whoami', '--bogus'], piped.io)).toBe(2);
+    expect(JSON.parse(piped.stderr)).toEqual(cliProblem('usage_error', "unknown option '--bogus'"));
+
     expect(await run(['no-such-command'], captureIo().io)).toBe(2);
     expect(await run([], captureIo().io)).toBe(2);
     expect(await run(['--help'], captureIo().io)).toBe(0);
@@ -134,6 +183,35 @@ describe('output and exit codes', () => {
     expect(await run(['whoami'], cap.io)).toBe(1);
 
     expect(cap.stderr).toContain('api.test');
+  });
+
+  it('a_failed_request_never_repeats_what_fetch_said', async () => {
+    // fetch quotes header values in its errors, the Authorization header among them.
+    vi.stubEnv('CHESLY_API_KEY', KEY);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new TypeError(`Headers.append: "Bearer ${KEY}" is an invalid header value.`))),
+    );
+
+    for (const isTTY of [false, true]) {
+      const cap = captureIo(isTTY);
+      expect(await run(['whoami'], cap.io)).toBe(1);
+      expect(cap.stdout + cap.stderr).not.toContain(KEY);
+      expect(cap.stdout + cap.stderr).not.toContain('Headers.append');
+      expect(cap.stderr).toContain('api.test');
+    }
+  });
+
+  it('a_bad_api_url_is_named_not_fetched', async () => {
+    vi.stubEnv('CHESLY_API_KEY', KEY);
+    vi.stubEnv('CHESLY_API_URL', 'not a url');
+    const calls = mockFetch(() => json(200, ME));
+    const cap = captureIo();
+
+    expect(await run(['whoami'], cap.io)).toBe(1);
+
+    expect(JSON.parse(cap.stderr)).toEqual(cliProblem('invalid_api_url', 'CHESLY_API_URL is not a valid URL.'));
+    expect(calls).toHaveLength(0);
   });
 
   it('help_lists_every_command_and_the_exit_codes', async () => {
