@@ -10,12 +10,22 @@ export interface Me {
   usage?: Record<string, unknown>;
 }
 
+/** Whether `value` is a `/v1/me` answer with the key's details. An empty 2xx body, or `{}`, is not. */
+export function isMe(value: unknown): value is Me {
+  if (typeof value !== 'object' || value === null) return false;
+  const { key } = value as { key?: unknown };
+  if (typeof key !== 'object' || key === null) return false;
+  const { name, scope } = key as { name?: unknown; scope?: unknown };
+  return typeof name === 'string' && typeof scope === 'string';
+}
+
 /** A connected chat account, as `/v1/accounts` returns it. */
 export interface Account {
   id: string;
   network: string;
   display_name: string;
-  status: 'connected' | 'disconnected' | 'needs_attention';
+  /** Missing or null from an API that doesn't send it: shown as "unknown". */
+  status?: 'connected' | 'disconnected' | 'needs_attention' | null;
   connected_at: string | null;
 }
 

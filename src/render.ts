@@ -17,11 +17,16 @@ export function accountTable(accounts: readonly Account[]): string {
     ...accounts.map((account) => [
       account.id,
       account.network,
-      account.status.replaceAll('_', ' '),
+      statusLabel(account.status),
       formatWhen(account.connected_at),
       oneLine(account.display_name ?? '', 60),
     ]),
   ]);
+}
+
+/** An account's status for people (`needs attention`), or `unknown` when the API sent none. */
+function statusLabel(status: unknown): string {
+  return typeof status === 'string' && status !== '' ? status.replaceAll('_', ' ') : 'unknown';
 }
 
 /** Chats as a table for people, the ID first. Also lists the candidates for an ambiguous name. */

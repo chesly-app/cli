@@ -95,13 +95,15 @@ included:
 - **Output:** tables in a terminal. When stdout is piped, or with `--json`, it prints the API's JSON
   as is.
 - **Errors** go to stderr. In JSON mode each one is a single line of problem details. An API error
-  prints exactly as the API sent it (`type`, `title`, `status`, `detail`, `code`, `request_id`).
+  prints exactly as the API sent it (`type`, `title`, `status`, `detail`, `code`, `request_id`, and
+  `retry_after` on a 429 or 503). In a terminal, a 429 or 503 ends with `Retry in N s.`
   The CLI's own errors print as `{"type":"https://agents.chesly.app/docs/errors#<code>","title":"...","code":"<code>"}`,
   plus their own fields (`candidates` for an ambiguous chat name).
 - **Other people's text** (names, messages) never reaches the terminal raw: tables drop escape
   sequences and other control characters, and JSON escapes them, so the parsed text is exact.
 - **Keys** are checked before they are sent, stored or shown: `ck_live_` and 48 letters, digits,
-  `_` or `-`. A malformed one exits 3 and is never printed.
+  `_` or `-`. A malformed `CHESLY_API_KEY` or stored key exits 3, and a malformed
+  `chesly login --key` exits 2 (usage). Neither is ever printed.
 - **Nothing prompts**, ever.
 - **Exit codes:**
 
@@ -110,7 +112,7 @@ included:
   | 0 | ok |
   | 1 | error |
   | 2 | usage |
-  | 3 | not signed in (no key, or the key was rejected) |
+  | 3 | not signed in (no key, a malformed one, or the key was rejected) |
   | 4 | not found (an unknown chat ID, or a name that matches no chat), or ambiguous (a name that matches several) |
   | 5 | rate limited |
 
@@ -126,7 +128,7 @@ included:
 | Variable | Use |
 |---|---|
 | `CHESLY_API_KEY` | The API key to use instead of the stored one |
-| `CHESLY_API_URL` | The API base URL (default `https://api.chesly.app`) |
+| `CHESLY_API_URL` | The API base URL, `http://` or `https://` (default `https://api.chesly.app`) |
 
 ## Development
 

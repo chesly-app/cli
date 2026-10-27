@@ -1,9 +1,10 @@
 import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { describeSource, maskKey, requireKey, type KeySource } from '../auth.js';
+import { CliError } from '../errors.js';
 import { Output, formatTable, type Io } from '../output.js';
 import { scopeLabel } from '../render.js';
-import type { Me } from '../shapes.js';
+import { isMe, type Me } from '../shapes.js';
 
 export function registerWhoami(program: Command, io: Io): void {
   program
@@ -12,7 +13,8 @@ export function registerWhoami(program: Command, io: Io): void {
     .action(async (_options: unknown, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const { key, source } = await requireKey();
-      const me = await apiRequest<Me>('/v1/me', { key });
+      const me = await apiRequest<unknown>('/v1/me', { key });
+      if (!isMe(me)) throw new CliError('invalid_response', 'The API sent no details for this key.');
       out.result(me, () => describeMe(me, key, source));
     });
 }

@@ -16,11 +16,16 @@ export function isApiKey(value: unknown): value is string {
   return typeof value === 'string' && KEY_FORMAT.test(value);
 }
 
-/** `CHESLY_API_URL` without a trailing slash, or https://api.chesly.app. */
+/** `CHESLY_API_URL` without a trailing slash, or https://api.chesly.app. Only http:// and https:// URLs. */
 function apiBaseUrl(): string {
   const configured = process.env.CHESLY_API_URL?.trim();
   const base = (configured || DEFAULT_API_URL).replace(/\/+$/, '');
   if (!URL.canParse(base)) throw new CliError('invalid_api_url', 'CHESLY_API_URL is not a valid URL.');
+  // `localhost:3000` parses too, as a URL whose scheme is "localhost:".
+  const { protocol } = new URL(base);
+  if (protocol !== 'https:' && protocol !== 'http:') {
+    throw new CliError('invalid_api_url', 'CHESLY_API_URL must start with http:// or https://, like https://api.chesly.app.');
+  }
   return base;
 }
 
@@ -48,7 +53,7 @@ export class CheslyApiError extends Error {
   readonly title: string;
   readonly detail: string | undefined;
   readonly requestId: string | undefined;
-  /** Seconds, from a Retry-After header. */
+  /** Seconds: the problem's `retry_after`, else the Retry-After header. */
   readonly retryAfter: number | undefined;
   /** What JSON mode prints: the API's problem details as received, or ones built from the answer. */
   readonly problem: Record<string, unknown>;
@@ -148,15 +153,23 @@ function errorFromResponse(response: Response, body: unknown): CheslyApiError {
     title: nonEmpty(fields.title) ?? nonEmpty(fields.error_description) ?? (response.statusText || `HTTP ${response.status}`),
     detail: nonEmpty(fields.detail),
     requestId: nonEmpty(fields.request_id) ?? response.headers.get('x-request-id') ?? undefined,
-    retryAfter: retryAfterSeconds(response.headers.get('retry-after')),
+    retryAfter: retryAfterSeconds(fields.retry_after) ?? retryAfterSeconds(response.headers.get('retry-after')),
     // Problem details are printed exactly as received; anything else gets problem details built for it.
-    problem: nonEmpty(fields.code) === undefined ? undefined : fields,
+    problem: isProblem(response, fields) ? fields : undefined,
   });
 }
 
-/** Retry-After is either seconds or an HTTP date. */
-function retryAfterSeconds(value: string | null): number | undefined {
-  if (value === null || value.trim() === '') return undefined;
+/** Problem details (RFC 9457): sent as application/problem+json, or JSON with a `type` or a `code`. */
+function isProblem(response: Response, fields: Record<string, unknown>): boolean {
+  if (Object.keys(fields).length === 0) return false;
+  const mediaType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+  return mediaType === 'application/problem+json' || typeof fields.type === 'string' || nonEmpty(fields.code) !== undefined;
+}
+
+/** Whole seconds from a problem's `retry_after` (seconds) or a Retry-After header (seconds or an HTTP date). */
+function retryAfterSeconds(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? Math.ceil(value) : undefined;
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
   const seconds = Number(value);
   if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
   const date = Date.parse(value);

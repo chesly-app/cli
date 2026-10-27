@@ -304,6 +304,49 @@ describe('chesly login', () => {
     expect(cap.stderr).toMatch(/signed in/i);
   });
 
+  it('a_me_answer_without_the_key_details_is_a_problem_not_undefined', async () => {
+    // whoami and login show the key's details from GET /v1/me. An empty 2xx printed "undefined"
+    // (or null), or crashed in a terminal.
+    vi.useFakeTimers();
+    const empties = [() => new Response('', { status: 200 }), () => new Response(null, { status: 204 }), () => json(200, {})];
+    const isProblem = (cap: ReturnType<typeof captureIo>, isTTY: boolean) => {
+      expect(cap.stdout).toBe('');
+      expect(cap.stdout + cap.stderr).not.toContain('undefined');
+      expect(cap.stderr).not.toContain('Unexpected error');
+      if (isTTY) expect(cap.stderr).toMatch(/^Error: The API sent no details for/m);
+      else expect(JSON.parse(lastLine(cap.stderr))).toMatchObject({ code: 'invalid_response' });
+    };
+
+    for (const empty of empties) {
+      mockFetch((call) => {
+        if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+        if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+        return empty();
+      });
+      for (const isTTY of [false, true]) {
+        keychain.value = KEY;
+        const whoami = captureIo(isTTY);
+        expect(await run(['whoami'], whoami.io)).toBe(1);
+        isProblem(whoami, isTTY);
+
+        // login --key checks the key first, so it stores nothing.
+        keychain.value = null;
+        const withKey = captureIo(isTTY);
+        expect(await run(['login', '--key', KEY], withKey.io)).toBe(1);
+        isProblem(withKey, isTTY);
+        expect(keychain.value).toBeNull();
+
+        // The device flow keeps its key: the server hands each key out once.
+        const device = captureIo(isTTY);
+        const exit = run(['login'], device.io);
+        await vi.runAllTimersAsync();
+        expect(await exit).toBe(1);
+        isProblem(device, isTTY);
+        expect(keychain.value).toBe(KEY);
+      }
+    }
+  });
+
   it('stores_the_key_in_a_0600_file_without_a_keychain', async () => {
     keychain.available = false;
     mockFetch(() => json(200, ME));

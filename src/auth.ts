@@ -58,6 +58,15 @@ export async function requireKey(): Promise<{ key: string; source: KeySource }> 
   return found;
 }
 
+/**
+ * requireKey's key, found once however many times it is asked for: a command that looks up a chat
+ * name, then makes its request, reads the keychain once (one `security` run on macOS).
+ */
+export function keyOnce(): () => Promise<string> {
+  let found: Promise<string> | undefined;
+  return () => (found ??= requireKey().then(({ key }) => key));
+}
+
 /** Stores the key in the OS keychain, or in the credentials file (0600) where there is none. */
 export async function storeKey(key: string): Promise<KeyStore> {
   if (!isApiKey(key)) throw new CliError('invalid_key_format', 'Refused to store an API key that is not well formed.');

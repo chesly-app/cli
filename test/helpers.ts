@@ -15,10 +15,13 @@ export const keychain = {
   available: true,
   /** Every call rejects with this while it is set: a locked keychain, or one that never answered. */
   failure: null as Error | null,
+  /** How many times the key was read. On macOS each read is one run of /usr/bin/security. */
+  reads: 0,
   reset(): void {
     this.value = null;
     this.available = true;
     this.failure = null;
+    this.reads = 0;
   },
 };
 
@@ -29,7 +32,10 @@ export async function openFakeKeychain(): Promise<Keychain | null> {
     return result();
   };
   return {
-    get: () => answer(() => keychain.value),
+    get: () => {
+      keychain.reads++;
+      return answer(() => keychain.value);
+    },
     set: (key) =>
       answer(() => {
         keychain.value = key;

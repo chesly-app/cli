@@ -1,5 +1,4 @@
 import { apiRequest } from './api.js';
-import { requireKey } from './auth.js';
 import { CliError, EXIT } from './errors.js';
 import { indent } from './output.js';
 import { chatTable } from './render.js';
@@ -14,21 +13,20 @@ so does the only partial match. No match, or several, exits 4, and JSON
 mode lists the chats a name could mean as "candidates".`;
 
 /**
- * The chat ID for `arg`, a chat ID or a chat's name.
+ * The chat ID for `arg`, a chat ID or a chat's name. `key` gives the API key, only when a name needs it.
  * - A `chat_` ID passes through unchecked: the API answers 404 `chat_not_found` for one that isn't yours.
  * - A name is looked up with `GET /v1/chats?q=<name>&archived=all&limit=10`. One exact match, ignoring
  *   case, wins; so does the only partial match.
  * - No match exits 4 (`chat_not_found`). Several exit 4 (`ambiguous_chat`), with the chats as
  *   `candidates`: the exact matches when there are several, else every match.
  */
-export async function resolveChat(arg: string): Promise<string> {
+export async function resolveChat(arg: string, key: () => Promise<string>): Promise<string> {
   const name = arg.trim();
   if (name.startsWith('chat_')) return name;
   if (name === '') throw new CliError('usage_error', 'Give a chat ID (chat_…) or a chat name.', EXIT.USAGE);
 
-  const { key } = await requireKey();
   const page = await apiRequest<ChatPage>('/v1/chats', {
-    key,
+    key: await key(),
     query: { q: name, archived: 'all', limit: LOOKUP_LIMIT },
   });
   // An exact match beats every partial one.

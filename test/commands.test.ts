@@ -194,6 +194,23 @@ describe('chat names', () => {
     expect(JSON.parse(cap.stderr)).toEqual(problemBody(404, 'chat_not_found', { title: 'Chat not found' }));
   });
 
+  it('a_command_reads_the_stored_key_once_even_when_it_looks_up_a_chat_name', async () => {
+    // On macOS every keychain read is a run of /usr/bin/security, and each can raise a dialog.
+    vi.stubEnv('CHESLY_API_KEY', '');
+    keychain.value = KEY;
+    serve({
+      '/v1/chats': () => json(200, { chats: [MOM], next_cursor: null }),
+      [`/v1/chats/${MOM.id}/messages`]: () => json(200, MESSAGES),
+      '/v1/messages/search': () => json(200, { messages: [] }),
+    });
+
+    for (const args of [['read', 'Mom'], ['search', 'lunch', '--chat', 'Mom'], ['read', MOM.id], ['search', 'lunch']]) {
+      keychain.reads = 0;
+      expect(await run(args, captureIo().io), args.join(' ')).toBe(0);
+      expect(keychain.reads, args.join(' ')).toBe(1);
+    }
+  });
+
   it('search_resolves_the_chat_and_passes_the_query_and_limit', async () => {
     const results = { messages: [MESSAGES.messages[2]] };
     const calls = serve({
@@ -260,6 +277,23 @@ describe('read commands', () => {
     expect(await run(['accounts'], terminal.io)).toBe(0);
     expect(terminal.stdout).toMatch(new RegExp(`^${WHATSAPP}\\s+whatsapp\\s+connected\\b.*\\+1 555 0100$`, 'm'));
     expect(terminal.stdout).toMatch(new RegExp(`^${IMESSAGE}\\s+imessage\\s+needs attention\\s+Nino$`, 'm'));
+  });
+
+  it('accounts_without_a_status_show_unknown', async () => {
+    const accounts = {
+      accounts: [
+        { id: WHATSAPP, network: 'whatsapp', display_name: 'Nino', connected_at: null },
+        { id: IMESSAGE, network: 'imessage', display_name: 'Nino', status: null, connected_at: null },
+      ],
+    };
+    serve({ '/v1/accounts': () => json(200, accounts) });
+    const cap = captureIo(true);
+
+    expect(await run(['accounts'], cap.io)).toBe(0);
+
+    expect(cap.stdout).toMatch(new RegExp(`^${WHATSAPP}\\s+whatsapp\\s+unknown\\s+Nino$`, 'm'));
+    expect(cap.stdout).toMatch(new RegExp(`^${IMESSAGE}\\s+imessage\\s+unknown\\s+Nino$`, 'm'));
+    expect(cap.stderr).toBe('');
   });
 
   it('every_read_command_needs_a_key', async () => {
@@ -349,6 +383,23 @@ describe('in a terminal', () => {
     expect(rows[0]).toMatch(new RegExp(`^${MOM.id}\\s+whatsapp\\s+dm\\s+2\\s+.+\\s+Mom$`));
     expect(rows[1]).toMatch(new RegExp(`^${BOOK_CLUB.id}\\s+whatsapp\\s+group\\s+.+Mom's book club {2}\\[muted, archived\\]$`));
     expect(cap.stderr).toContain('chesly chats --unread --cursor cur_next');
+  });
+
+  it('paging_hints_are_shell_quoted', async () => {
+    // Pasted into a shell, a hint must run as shown, whatever the cursor or the account ID holds.
+    const cursor = "cur 'x'$y";
+    serve({
+      '/v1/chats': () => json(200, { chats: [MOM], next_cursor: cursor }),
+      [`/v1/chats/${MOM.id}/messages`]: () => json(200, { ...MESSAGES, next_cursor: cursor }),
+    });
+
+    const chats = captureIo(true);
+    expect(await run(['chats', '--account', 'acct one', '--limit', '5'], chats.io)).toBe(0);
+    expect(chats.stderr).toContain("More chats: chesly chats --account 'acct one' --limit 5 --cursor 'cur '\\''x'\\''$y'\n");
+
+    const read = captureIo(true);
+    expect(await run(['read', MOM.id], read.io)).toBe(0);
+    expect(read.stderr).toContain(`Older messages: chesly read ${MOM.id} --cursor 'cur '\\''x'\\''$y'\n`);
   });
 
   it('catchup_reads_like_a_digest', async () => {

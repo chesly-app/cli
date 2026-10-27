@@ -1,8 +1,8 @@
 import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
-import { requireKey } from '../auth.js';
+import { keyOnce } from '../auth.js';
 import { parseLimit } from '../options.js';
-import { Output, type Io } from '../output.js';
+import { Output, shellQuote, type Io } from '../output.js';
 import { transcript } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
 import type { MessagePage } from '../shapes.js';
@@ -33,16 +33,16 @@ Examples:
     )
     .action(async (chat: string, options: ReadOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
-      const chatId = await resolveChat(chat);
-      const { key } = await requireKey();
+      const key = keyOnce();
+      const chatId = await resolveChat(chat, key);
       const page = await apiRequest<MessagePage>(`/v1/chats/${encodeURIComponent(chatId)}/messages`, {
-        key,
+        key: await key(),
         query: { limit: options.limit, cursor: options.cursor },
       });
       out.result(page, () => (page.messages.length === 0 ? 'No messages.' : transcript(page.messages)));
       if (!out.json && page.next_cursor) {
         const limit = options.limit === undefined ? '' : ` --limit ${options.limit}`;
-        out.note(`Older messages: chesly read ${chatId}${limit} --cursor ${page.next_cursor}`);
+        out.note(`Older messages: chesly read ${shellQuote(chatId)}${limit} --cursor ${shellQuote(page.next_cursor)}`);
       }
     });
 }

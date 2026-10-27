@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
 import { parseLimit } from '../options.js';
-import { Output, type Io } from '../output.js';
+import { Output, shellQuote, type Io } from '../output.js';
 import { chatTable } from '../render.js';
 import type { ChatPage } from '../shapes.js';
 
@@ -40,9 +40,9 @@ export function registerChats(program: Command, io: Io): void {
       if (!out.json && page.next_cursor) {
         const flags = [
           options.unread ? '--unread' : '',
-          options.account ? `--account ${options.account}` : '',
+          options.account ? `--account ${shellQuote(options.account)}` : '',
           options.limit ? `--limit ${options.limit}` : '',
-          `--cursor ${page.next_cursor}`,
+          `--cursor ${shellQuote(page.next_cursor)}`,
         ];
         out.note(`More chats: chesly chats ${flags.filter(Boolean).join(' ')}`);
       }

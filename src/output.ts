@@ -78,6 +78,14 @@ function toJson(value: unknown, space?: number): string {
   );
 }
 
+/**
+ * `value` as one shell word in a command for people to paste: as it is when it holds only characters
+ * no shell treats specially, else in single quotes, with '\'' for a quote inside (sh, bash and zsh).
+ */
+export function shellQuote(value: string): string {
+  return /^[A-Za-z0-9_./:@,+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /** Every line of `text`, indented by `prefix`. */
 export function indent(text: string, prefix: string): string {
   return text
@@ -199,7 +207,8 @@ function exitCodeForStatus(status: number): ExitCode {
 
 function hintFor(error: CheslyApiError): string | undefined {
   if (error.status === 401) return 'Run `chesly login` to sign in again, or check CHESLY_API_KEY.';
-  if (error.status === 429 && error.retryAfter !== undefined) return `Try again in ${error.retryAfter} s.`;
+  const retryable = error.status === 429 || error.status === 503;
+  if (retryable && error.retryAfter !== undefined) return `Retry in ${error.retryAfter} s.`;
   return undefined;
 }
 

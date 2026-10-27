@@ -6,7 +6,7 @@ import { describeSource, storeKey, type KeyStore } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { Output, type Io } from '../output.js';
 import { scopeLabel } from '../render.js';
-import type { Me } from '../shapes.js';
+import { isMe, type Me } from '../shapes.js';
 
 /** `POST /v1/cli/sessions` (RFC 8628 §3.2), checked: `link` always carries the code. */
 interface CliSession {
@@ -53,21 +53,23 @@ async function loginWithKey(out: Output, key: string): Promise<void> {
       EXIT.USAGE,
     );
   }
-  // A rejected key (401) throws here, before anything is stored.
-  const me = await apiRequest<Me>('/v1/me', { key });
+  // A rejected key (401) throws here, before anything is stored, and so does an answer without its details.
+  const me = await apiRequest<unknown>('/v1/me', { key });
+  if (!isMe(me)) throw badAnswer('The API sent no details for this key. Nothing was stored.');
   signedIn(out, await storeKey(key), me);
 }
 
 /**
  * The new key is checked with GET /v1/me before it is stored, as with --key, so a rejected key fails
  * the sign-in. Only when the check can't run (a network blip, a 5xx, a 429) is the key stored
- * unchecked: the server hands each key out once, and dropping it would orphan it.
+ * unchecked: the server hands each key out once, and dropping it would orphan it. For the same
+ * reason, an answer that accepts the key but sends none of its details stores it, then fails.
  */
 async function loginInBrowser(out: Output): Promise<void> {
   const key = await approveInBrowser(out);
-  let me: Me;
+  let me: unknown;
   try {
-    me = await apiRequest<Me>('/v1/me', { key });
+    me = await apiRequest<unknown>('/v1/me', { key });
   } catch (error) {
     if (!checkCouldNotRun(error)) throw error;
     const store = await storeKey(key);
@@ -75,7 +77,12 @@ async function loginInBrowser(out: Output): Promise<void> {
     noteEnvKey(out);
     return;
   }
-  signedIn(out, await storeKey(key), me);
+  const store = await storeKey(key);
+  if (!isMe(me)) {
+    const saved = `It is saved in ${describeSource(store)}: run \`chesly whoami\` to check it.`;
+    throw badAnswer(`The API sent no details for the new key. ${saved}`);
+  }
+  signedIn(out, store, me);
 }
 
 function checkCouldNotRun(error: unknown): error is CheslyNetworkError | CheslyApiError {

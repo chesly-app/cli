@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
-import { requireKey } from '../auth.js';
+import { keyOnce } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { parseLimit } from '../options.js';
 import { Output, type Io } from '../output.js';
@@ -33,10 +33,10 @@ Examples:
       const out = new Output(io, command.optsWithGlobals());
       const q = query.trim();
       if (q === '') throw new CliError('usage_error', 'Give the words to search for.', EXIT.USAGE);
-      const chatId = options.chat === undefined ? undefined : await resolveChat(options.chat);
-      const { key } = await requireKey();
+      const key = keyOnce();
+      const chatId = options.chat === undefined ? undefined : await resolveChat(options.chat, key);
       const result = await apiRequest<{ messages: SearchHit[] }>('/v1/messages/search', {
-        key,
+        key: await key(),
         query: { q, chat_id: chatId, limit: options.limit },
       });
       out.result(result, () =>
