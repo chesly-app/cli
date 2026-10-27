@@ -1,0 +1,46 @@
+{
+  "name": "chesly",
+  "version": "0.1.0",
+  "description": "Chesly CLI: your chats from the terminal and your agents",
+  "private": false,
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "chesly": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --target node20 --clean",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chesly-app/cli.git"
+  },
+  "homepage": "https://github.com/chesly-app/cli#readme",
+  "keywords": [
+    "chesly",
+    "cli",
+    "messages",
+    "chat",
+    "agents",
+    "mcp"
+  ],
+  "dependencies": {
+    "@napi-rs/keyring": "2.1.1",
+    "commander": "14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "tsup": "8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}
