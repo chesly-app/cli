@@ -35,9 +35,14 @@ JSON mode (piped, or `--json`) the link and the code are one JSON line on stderr
 ```
 
 The key goes to your OS keychain (macOS Keychain, Windows Credential Manager, or the Secret Service
-on Linux). Where there is none, it goes to `~/.config/chesly/credentials.json` with mode 0600. A
-keychain that doesn't answer within 10 seconds (locked, or showing a dialog nobody answers) fails
-the command with `keychain_timeout` instead of keeping it waiting.
+on Linux). Where there is none, it goes to `~/.config/chesly/credentials.json` with mode 0600.
+
+A keychain that refuses (`keychain_error`) or doesn't answer within 10 seconds (`keychain_timeout`:
+locked, or showing a dialog nobody answers) never leaves a command waiting: reading the key falls
+back to the credentials file when it holds one, `chesly login` stores the key in the file instead
+and succeeds (after up to 20 seconds when the keychain doesn't answer), and only a read with no key
+in the file fails with that code, as does `chesly logout`, which still removes the file and lists
+what it removed in `removed`.
 
 For CI and servers, set `CHESLY_API_KEY` instead. It wins over the stored key.
 

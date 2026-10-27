@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,7 +6,7 @@ vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./help
 vi.mock('node:child_process', () => ({ spawn: vi.fn(() => ({ on: vi.fn(), unref: vi.fn() })) }));
 
 import { spawn } from 'node:child_process';
-import { resolveKey } from '../src/auth.js';
+import { describeSource, resolveKey } from '../src/auth.js';
 import { run } from '../src/cli.js';
 import { KeychainTimeoutError } from '../src/errors.js';
 import {
@@ -391,6 +391,41 @@ describe('resolveKey', () => {
     expect(terminal.stderr).toContain('chesly login');
   });
 
+  it('a_keychain_that_refuses_is_keychain_error_not_not_signed_in', async () => {
+    // "Not signed in" sends an agent to chesly login, which mints another key: it is only for a
+    // keychain that holds no key, never for one that failed to answer.
+    keychain.value = KEY;
+    keychain.failure = new Error('security: SecKeychainSearchCopyNext: User interaction is not allowed.');
+    const calls = mockFetch(() => json(200, ME));
+
+    const piped = captureIo();
+    expect(await run(['whoami'], piped.io)).toBe(1);
+    expect(JSON.parse(piped.stderr)).toMatchObject({
+      code: 'keychain_error',
+      title: expect.stringContaining('User interaction is not allowed.'),
+    });
+    expect(calls).toHaveLength(0);
+
+    // The keychain's own words are shown, but never a key in them.
+    keychain.failure = new Error(`security: could not read ${KEY}`);
+    const quoting = captureIo(true);
+    expect(await run(['whoami'], quoting.io)).toBe(1);
+    expect(quoting.stderr).toContain('security: could not read ck_live_…');
+    expect(quoting.stderr).not.toContain(KEY);
+
+    // A key in the credentials file is still used.
+    writeCredentials(env.home, keyFor('file'));
+    expect(await run(['whoami'], captureIo().io)).toBe(0);
+    expect(calls.at(-1)?.headers.authorization).toBe(`Bearer ${keyFor('file')}`);
+
+    // Without a keychain, or with one that holds no key, it is "not signed in".
+    rmSync(credentialsFile(env.home));
+    keychain.available = false;
+    expect(await run(['whoami'], captureIo().io)).toBe(3);
+    keychain.reset();
+    expect(await run(['whoami'], captureIo().io)).toBe(3);
+  });
+
   it('a_keychain_that_never_answers_is_a_problem_not_a_hang', async () => {
     // keychain.ts gives up after 10 s (test/keychain.test.ts); here is what the command makes of it.
     keychain.value = KEY;
@@ -477,9 +512,27 @@ describe('chesly logout and chesly key', () => {
 
     expect(await run(['logout'], cap.io)).toBe(1);
 
-    // The file goes first, so a keychain that fails can't leave the key behind in it.
+    // The file goes first, so a keychain that fails can't leave the key behind in it. A half logout
+    // shows: `removed` lists what went.
     expect(existsSync(credentialsFile(env.home))).toBe(false);
-    expect(JSON.parse(cap.stderr)).toMatchObject({ code: 'keychain_error' });
+    expect(JSON.parse(cap.stderr)).toMatchObject({ code: 'keychain_error', removed: ['file'] });
+  });
+
+  it('logout_removes_the_keychain_entry_even_when_the_file_cannot_go', async () => {
+    keychain.value = KEY;
+    mkdirSync(credentialsFile(env.home), { recursive: true }); // a directory: rm refuses it
+
+    const piped = captureIo();
+    expect(await run(['logout'], piped.io)).toBe(1);
+    expect(keychain.value).toBeNull();
+    expect(JSON.parse(piped.stderr)).toMatchObject({ code: 'credentials_file_error', removed: ['keychain'] });
+
+    // A terminal says under the error what did go.
+    keychain.value = KEY;
+    const terminal = captureIo(true);
+    expect(await run(['logout'], terminal.io)).toBe(1);
+    expect(terminal.stderr).toMatch(/^Error: Couldn't remove the key from .*credentials\.json/m);
+    expect(terminal.stderr).toContain(`Removed it from ${describeSource('keychain')}.`);
   });
 
   it('key_reveal_prints_the_key_and_nothing_else', async () => {
