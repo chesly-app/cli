@@ -131,6 +131,36 @@ describe('chesly login', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it('device_login_backs_off_after_failures_and_never_sleeps_past_the_expiry', async () => {
+    // RFC 8628 §3.5: slow down after a connection failure. The wait doubles after a network error or
+    // a 5xx, up to 30 s, and the last wait ends when the code does.
+    vi.useFakeTimers();
+    const answers = [
+      () => Promise.reject(new TypeError('fetch failed')),
+      () => problem(503, 'upstream_unavailable'),
+      () => problem(502, 'bad_gateway'),
+      () => problem(500, 'internal_error'),
+    ];
+    const calls = mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, { ...SESSION, interval: 3, expires_in: 60 });
+      if (call.url.endsWith('/v1/cli/sessions/token')) return answers.shift()?.() ?? json(400, { error: 'authorization_pending' });
+      return json(200, ME);
+    });
+    const cap = captureIo();
+
+    const exit = run(['login'], cap.io);
+    await vi.runAllTimersAsync();
+    expect(await exit).toBe(1);
+
+    const start = calls[0]?.at ?? 0;
+    const polls = calls.filter((call) => call.url.endsWith('/token')).map((call) => call.at - start);
+    // 3 s, then 6, 12 and 24 s. The next wait (30 s, the cap) would pass the expiry: it stops there.
+    expect(polls).toEqual([3000, 9000, 21000, 45000]);
+    expect(Date.now() - start).toBe(60000);
+    expect(JSON.parse(lastLine(cap.stderr))).toMatchObject({ code: 'expired_token' });
+    expect(keychain.value).toBeNull();
+  });
+
   it('device_login_opens_the_browser_only_in_a_terminal', async () => {
     vi.useFakeTimers();
     vi.stubEnv('DISPLAY', ':0'); // Linux and BSD only open a browser where there is a display.

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import type { Command } from 'commander';
-import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey } from '../api.js';
+import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey, sleep } from '../api.js';
 import { describeSource, storeKey, type KeyStore } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { Output, oneLine, terminalSafe, type Io } from '../output.js';
@@ -90,7 +90,13 @@ function checkCouldNotRun(error: unknown): error is CheslyNetworkError | CheslyA
   return error instanceof CheslyApiError && (error.status >= 500 || error.status === 429);
 }
 
-/** The device flow: show the link, then poll until the code is approved, denied or expired (RFC 8628 §3.4-3.5). */
+/** The longest wait between polls after failures (RFC 8628 §3.5 asks a client to slow down after one). */
+const MAX_BACKOFF_SECONDS = 30;
+
+/**
+ * The device flow: show the link, then poll until the code is approved, denied or expired (RFC 8628
+ * §3.4-3.5). A network error or a 5xx doubles the wait (up to 30 s), and no wait runs past the expiry.
+ */
 async function approveInBrowser(out: Output): Promise<string> {
   const session = checkSession(
     await apiRequest<unknown>('/v1/cli/sessions', { method: 'POST', body: { client_name: hostname() } }),
@@ -110,7 +116,7 @@ async function approveInBrowser(out: Output): Promise<string> {
   let interval = session.interval;
   const expiresAt = Date.now() + session.expiresIn * 1000;
   for (;;) {
-    await sleep(interval * 1000);
+    await sleep(Math.min(interval * 1000, Math.max(0, expiresAt - Date.now())));
     if (Date.now() >= expiresAt) throw expired();
     let token: { api_key?: unknown } | undefined;
     try {
@@ -133,9 +139,13 @@ async function approveInBrowser(out: Output): Promise<string> {
           interval = Math.max(interval + 5, error.retryAfter ?? 0);
           continue;
         }
-        if (error.status >= 500) continue;
+        if (error.status >= 500) {
+          interval = slowerAfterFailure(interval);
+          continue;
+        }
       } else if (error instanceof CheslyNetworkError) {
-        continue; // A blip: keep polling until the code expires.
+        interval = slowerAfterFailure(interval); // A blip: keep polling, slower, until the code expires.
+        continue;
       }
       throw error;
     }
@@ -145,6 +155,11 @@ async function approveInBrowser(out: Output): Promise<string> {
     }
     return apiKey;
   }
+}
+
+/** Twice the wait, at most 30 s, but never less than it already is (slow_down may have made it longer). */
+function slowerAfterFailure(interval: number): number {
+  return Math.max(interval, Math.min(interval * 2, MAX_BACKOFF_SECONDS));
 }
 
 /** The answer to `POST /v1/cli/sessions`, checked before anything is shown. */
@@ -237,8 +252,4 @@ function isWebUrl(value: string): boolean {
 
 function positiveOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
