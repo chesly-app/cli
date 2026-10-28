@@ -118,6 +118,26 @@ describe('chesly watch', () => {
     ]);
   });
 
+  it('a_reconnect_before_any_event_resumes_from_the_streams_starting_point', async () => {
+    // The stream names where it starts (id-only frame); a drop before the first event resumes there.
+    const calls = serve({
+      [STREAM]: inTurn(
+        () => sseResponse(['retry: 3000\nid: evt_head\n\n'], { end: 'drop' }),
+        (call) => sseResponse([frame(RECEIVED)], { end: 'open', signal: call.signal }),
+      ),
+    });
+    const cap = captureIo();
+
+    const exit = run(['watch'], cap.io);
+    await vi.waitFor(() => expect(streams(calls)).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(lines(cap.stdout)).toHaveLength(1));
+    cap.interrupt();
+
+    expect(await exit).toBe(0);
+    expect(streams(calls)[1]?.headers['last-event-id']).toBe('evt_head');
+  });
+
   it('a_silent_connection_is_dropped_and_resumed', async () => {
     // A connection that dies without a word (a laptop asleep, a NAT gone) sends no pings.
     const calls = serve({

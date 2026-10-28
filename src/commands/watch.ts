@@ -49,10 +49,12 @@ chat.updated, chat.read, account.connected, account.disconnected,
 account.needs_attention, reaction.added and reaction.removed.
 
 It runs until Ctrl+C, which exits 0. A dropped connection is retried on its
-own, after 3 s and then longer (up to 30 s), resuming after the last event it
-printed, so nothing is missed. An event can come twice: skip ids you have
-seen. A resume point older than 4 days starts over from new events, with a
-warning on stderr (a JSON line in JSON mode).
+own, after 3 s and then longer (up to 30 s), resuming after the last event ID
+the stream gave: an event's, or the stream's starting point when the API names
+it. From then on nothing is missed; before it, events during a reconnect can
+be (--after <evt_id> pins the start). An event can come twice: skip ids you
+have seen. A resume point older than 4 days starts over from new events, with
+a warning on stderr (a JSON line in JSON mode).
 
 Email events come only when --networks names email, or --account is an
 email account. With --networks naming one network, --chat looks its name up
@@ -117,6 +119,12 @@ async function watchEvents(
           for await (const event of readEventStream(response, { idleTimeoutMs: IDLE_TIMEOUT_MS })) {
             if (stopped.signal.aborted) return;
             if (event.retry !== undefined) retryMs = Math.min(Math.max(event.retry, MIN_RETRY_MS), MAX_RETRY_MS);
+            if (event.data === null) {
+              // The stream's own position (its start, before any event): a reconnect resumes there.
+              lastId = event.id ?? undefined;
+              cursor = undefined;
+              continue;
+            }
             const apiEvent = parseEvent(event.data);
             if (apiEvent === undefined) out.warn('invalid_event', 'Skipped an event that is not an event object.');
             else out.line(apiEvent, () => eventLine(apiEvent));

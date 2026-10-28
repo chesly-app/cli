@@ -55,7 +55,7 @@ describe('readEventStream', () => {
         ':no space either\n',
         'id: evt_1\n: a comment inside an event\ndata: one\n\n',
         ': ping\n\n: ping\n\n',
-        // An event with no data line is never dispatched, and its type doesn't leak into the next.
+        // A frame with no data line is no event, and its type doesn't leak into the next.
         'event: chat.read\nid: evt_2\n\n',
         'data: two\n\n',
       ]),
@@ -63,7 +63,20 @@ describe('readEventStream', () => {
 
     expect(events).toEqual([
       { id: 'evt_1', event: null, data: 'one' },
+      // Its id still moves the last event ID, so it is surfaced, with no data.
+      { id: 'evt_2', event: null, data: null },
       { id: 'evt_2', event: null, data: 'two' },
+    ]);
+  });
+
+  it('an_id_only_frame_moves_the_last_event_id', async () => {
+    // The stream's starting point, before any event: where a reconnect resumes (WHATWG keeps it).
+    const { events } = await collect(sseResponse(['retry: 3000\nid: evt_head\n\n', ': ping\n\n', 'id:\n\n']));
+
+    expect(events).toEqual([
+      { id: 'evt_head', event: null, data: null, retry: 3000 },
+      // An empty id resets it: no cursor at all.
+      { id: null, event: null, data: null, retry: 3000 },
     ]);
   });
 

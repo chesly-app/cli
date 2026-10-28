@@ -7,13 +7,19 @@
  *   to later events; `retry` counts only when it is all digits;
  * - a blank line dispatches the event, unless it has no data;
  * - a frame the stream ends in the middle of is dropped, never half delivered.
+ * A frame with an `id` but no data is no event, yet it moves the last event ID (where a reconnect
+ * resumes), so it is surfaced too, with `data: null`.
  */
 
-/** One dispatched event. `retry` is the latest reconnection time the stream set, in ms, if any. */
+/**
+ * One dispatched event, or (`data: null`) a frame that only set the last event ID: `id` is then the
+ * new last event ID, null when the frame reset it. `retry` is the latest reconnection time the stream
+ * set, in ms, if any.
+ */
 export interface ServerSentEvent {
   id: string | null;
   event: string | null;
-  data: string;
+  data: string | null;
   retry?: number;
 }
 
@@ -41,6 +47,7 @@ export async function* readEventStream(
   let data = '';
   let type = '';
   let lastId = '';
+  let frameHasId = false;
   let retry: number | undefined;
   try {
     for (;;) {
@@ -48,18 +55,22 @@ export async function* readEventStream(
       if (done) return; // A frame still open here is dropped.
       for (const line of lines.push(decoder.decode(value, { stream: true }))) {
         if (line === '') {
-          // A blank line ends the frame. One without data is no event, and its type goes with it.
+          // A blank line ends the frame. One without data is no event, and its type goes with it,
+          // but an id it set is still where a reconnect resumes.
           const frame = data;
           const frameType = type;
+          const movedId = frameHasId;
           data = '';
           type = '';
-          if (frame === '') continue;
-          yield {
-            id: lastId === '' ? null : lastId,
-            event: frameType === '' ? null : frameType,
-            data: frame.slice(0, -1), // every data line added a \n; the last one goes
-            ...(retry === undefined ? {} : { retry }),
-          };
+          frameHasId = false;
+          const id = lastId === '' ? null : lastId;
+          const retryField = retry === undefined ? {} : { retry };
+          if (frame !== '') {
+            // Every data line added a \n; the last one goes.
+            yield { id, event: frameType === '' ? null : frameType, data: frame.slice(0, -1), ...retryField };
+          } else if (movedId) {
+            yield { id, event: null, data: null, ...retryField };
+          }
           continue;
         }
         if (line.startsWith(':')) continue;
@@ -69,7 +80,10 @@ export async function* readEventStream(
         if (value.startsWith(' ')) value = value.slice(1);
         if (field === 'data') data += `${value}\n`;
         else if (field === 'event') type = value;
-        else if (field === 'id' && !value.includes('\u0000')) lastId = value;
+        else if (field === 'id' && !value.includes('\u0000')) {
+          lastId = value;
+          frameHasId = true;
+        }
         else if (field === 'retry' && /^[0-9]+$/.test(value)) retry = Number(value);
       }
     }
