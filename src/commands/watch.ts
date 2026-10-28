@@ -69,7 +69,8 @@ Examples:
       const key = keyOnce();
       // A name is looked up on the one network --networks names, if it names one (email included).
       const network = options.networks?.length === 1 ? options.networks[0] : undefined;
-      const chatId = options.chat === undefined ? undefined : (await resolveChat(options.chat, key, { network })).id;
+      const lookup = { network, accountId: options.account };
+      const chatId = options.chat === undefined ? undefined : (await resolveChat(options.chat, key, lookup)).id;
       const filters = {
         chat_id: chatId,
         account_id: options.account,

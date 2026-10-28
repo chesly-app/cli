@@ -255,8 +255,8 @@ describe('chesly watch', () => {
     cap.interrupt();
 
     expect(await exit).toBe(0);
-    // --chat resolves to its chat_ ID first.
-    expect(paramsOf(calls[0])).toEqual({ q: 'Mom', archived: 'all', limit: '10' });
+    // --chat resolves to its chat_ ID first, within the account --account names.
+    expect(paramsOf(calls[0])).toEqual({ q: 'Mom', archived: 'all', limit: '10', account_id: WHATSAPP });
     expect(paramsOf(streams(calls)[0])).toEqual({
       chat_id: MOM.id,
       account_id: WHATSAPP,

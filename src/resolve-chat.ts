@@ -23,16 +23,16 @@ export interface ResolvedChat {
 /**
  * The chat `arg` names: a chat ID or a chat's name. `key` gives the API key, only when a name needs it.
  * - A `chat_` ID passes through unchecked: the API answers 404 `chat_not_found` for one that isn't yours.
- * - A name is looked up with `GET /v1/chats?q=<name>&archived=all&limit=10`, plus `network` when
- *   `options.network` is set. Without it the API leaves email out, so an email thread needs
- *   `network: 'email'`. One exact match, ignoring case, wins; so does the only partial match.
+ * - A name is looked up with `GET /v1/chats?q=<name>&archived=all&limit=10`, plus `network` and
+ *   `account_id` when `options` sets them. Without a network the API leaves email out, so an email
+ *   thread needs `network: 'email'`. One exact match, ignoring case, wins; so does the only partial match.
  * - No match exits 4 (`chat_not_found`). Several exit 4 (`ambiguous_chat`), with the chats as
  *   `candidates`: the exact matches when there are several, else every match.
  */
 export async function resolveChat(
   arg: string,
   key: () => Promise<string>,
-  options: { network?: string | undefined } = {},
+  options: { network?: string | undefined; accountId?: string | undefined } = {},
 ): Promise<ResolvedChat> {
   const name = arg.trim();
   if (name.startsWith('chat_')) return { id: name, name: null };
@@ -40,7 +40,7 @@ export async function resolveChat(
 
   const answer = await apiRequest<unknown>('/v1/chats', {
     key: await key(),
-    query: { q: name, archived: 'all', limit: LOOKUP_LIMIT, network: options.network },
+    query: { q: name, archived: 'all', limit: LOOKUP_LIMIT, network: options.network, account_id: options.accountId },
   });
   const page = expectAnswer(answer, isChatPage, 'a page of chats');
   // An exact match beats every partial one.
