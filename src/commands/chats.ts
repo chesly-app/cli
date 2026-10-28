@@ -17,12 +17,25 @@ interface ChatsOptions {
 export function registerChats(program: Command, io: Io): void {
   program
     .command('chats')
-    .description('List your chats, most recent first')
+    .description('List your chats: pinned chats first, then the most recent')
     .option('--unread', 'only chats with unread messages')
     .option('--account <id>', 'only chats on this account: an acct_ ID from `chesly accounts`')
     .option('--network <name>', 'only this network: email, whatsapp, telegram… (email only when named)', parseNetwork)
     .option('--limit <n>', 'how many chats, 1 to 100 (default 50)', parseLimit)
     .option('--cursor <cursor>', 'the next page: next_cursor from the page before')
+    .addHelpText(
+      'after',
+      `
+Archived chats are left out, as is email unless --network email asks for it.
+A name lookup (chesly read, chesly send) still finds an archived chat.
+
+Prints the API's page, { "chats": [...], "next_cursor" }, or a table in a
+terminal, with the command for the next page while there is one.
+
+Examples:
+  chesly chats --unread
+  chesly chats --network email --limit 20`,
+    )
     .action(async (options: ChatsOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const { key } = await requireKey();

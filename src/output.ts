@@ -209,6 +209,26 @@ interface Failure {
   hint?: string | undefined;
 }
 
+/**
+ * The API's details for these codes name REST paths and parameters a CLI user never types
+ * (GET /v1/chats, account_id). A terminal shows the code's title, or `message`, then the CLI's way on.
+ * JSON mode keeps the problem as the API sent it.
+ */
+const CLI_WORDING: Readonly<Record<string, { message?: string; hint: string }>> = {
+  chat_not_found: { hint: 'chesly chats lists your chats (email threads with --network email).' },
+  account_not_found: { hint: 'chesly accounts lists your accounts.' },
+  message_not_found: { hint: "chesly read <chat> shows a chat's messages with their IDs." },
+  ambiguous_account: {
+    hint: "Leave out --account: you have more than one account on this network, and their chats can't be told apart yet.",
+  },
+  invalid_reply_to: {
+    message: '--reply-to must be a message in this chat.',
+    hint: 'chesly read <chat> shows its messages with their IDs.',
+  },
+  webhook_not_found: { hint: 'chesly webhooks list lists your webhooks.' },
+  key_not_found: { hint: 'chesly keys list lists your API keys.' },
+};
+
 function describeFailure(error: unknown): Failure {
   if (error instanceof AnnotatedError) {
     const failure = describeFailure(error.error);
@@ -219,12 +239,14 @@ function describeFailure(error: unknown): Failure {
     };
   }
   if (error instanceof CheslyApiError) {
+    const wording = CLI_WORDING[error.code];
+    const message = wording === undefined ? error.message : (wording.message ?? error.title);
     return {
-      message: error.message,
+      message,
       exitCode: exitCodeFor(error),
       problem: error.problem,
       requestId: error.requestId,
-      hint: hintFor(error),
+      hint: [wording?.hint, hintFor(error, message)].filter(Boolean).join('\n') || undefined,
     };
   }
   if (error instanceof CliError) {
@@ -255,10 +277,11 @@ function exitCodeFor(error: CheslyApiError): ExitCode {
   return EXIT.ERROR;
 }
 
-function hintFor(error: CheslyApiError): string | undefined {
+/** What to do next, unless `message` already says when to retry (the API's details often do). */
+function hintFor(error: CheslyApiError, message: string): string | undefined {
   if (error.status === 401) return 'Run `chesly login` to sign in again, or check CHESLY_API_KEY.';
   const retryable = error.status === 429 || error.status === 503;
-  if (retryable && error.retryAfter !== undefined) return `Retry in ${error.retryAfter} s.`;
+  if (retryable && error.retryAfter !== undefined && !/\bretry in\b/i.test(message)) return `Retry in ${error.retryAfter} s.`;
   return undefined;
 }
 

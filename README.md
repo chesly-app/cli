@@ -246,9 +246,12 @@ included, on every network but email (add `--network email` for email threads):
 
 - **Output:** tables in a terminal. When stdout is piped, or with `--json`, it prints the API's JSON
   as is; `watch` prints one JSON object a line.
-- **Errors** go to stderr. In JSON mode each one is a single line of problem details. An API error
-  prints exactly as the API sent it (`type`, `title`, `status`, `detail`, `code`, `request_id`, and
-  `retry_after` on a 429 or 503). In a terminal, a 429 or 503 ends with `Retry in N s.`
+- **Errors** go to stderr. In JSON mode each one is a single line of problem details. Problem
+  details from the API print exactly as the API sent them (`type`, `title`, `status`, `detail`,
+  `code`, `request_id`, and `retry_after` when it says when to retry). In a terminal, an error that
+  says when to retry ends with `Retry in N s.`, unless its message already says so, and where the
+  API's detail names a REST path or parameter (`GET /v1/chats`, `account_id`), the terminal shows
+  the error's title and the CLI command to use instead (`chesly chats`, `--account`).
   The CLI's own errors print as `{"type":"https://agents.chesly.app/docs/errors#<code>","title":"...","code":"<code>"}`,
   plus their own fields (`candidates` for an ambiguous chat name, `idempotency_key` for a send that
   may or may not have gone out). An answer without problem details (a gateway's 502, say) gets

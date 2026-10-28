@@ -285,6 +285,85 @@ describe('read commands', () => {
 });
 
 describe('in a terminal', () => {
+  it('rest_details_become_cli_hints', async () => {
+    // The API's details name REST paths and parameters (GET /v1/chats, account_id) that a CLI user
+    // never types. A terminal shows the code's title, or the CLI's words for it, and the CLI's way
+    // to go on; JSON keeps the problem exactly as the API sent it.
+    const cases: Array<{ args: string[]; status: number; code: string; title: string; detail: string; message: string; hint: RegExp }> = [
+      {
+        args: ['read', 'chat_Xx0000000000000000Xx'],
+        status: 404,
+        code: 'chat_not_found',
+        title: 'Chat not found.',
+        detail: 'No chat with this ID. GET /v1/chats lists yours.',
+        message: 'Chat not found.',
+        hint: /^chesly chats lists your chats/m,
+      },
+      {
+        args: ['chats', '--account', 'acct_x'],
+        status: 404,
+        code: 'account_not_found',
+        title: 'Account not found.',
+        detail: 'No account with this ID. GET /v1/accounts lists yours.',
+        message: 'Account not found.',
+        hint: /^chesly accounts lists your accounts/m,
+      },
+      {
+        args: ['chats', '--account', WHATSAPP],
+        status: 400,
+        code: 'ambiguous_account',
+        title: "This account's chats can't be told apart yet.",
+        detail: "You have more than one account on this network, and Chesly can't yet tell their chats apart. Leave out account_id.",
+        message: "This account's chats can't be told apart yet.",
+        hint: /^Leave out --account/m,
+      },
+      {
+        args: ['send', MOM.id, 'hi', '--reply-to', 'msg_x'],
+        status: 400,
+        code: 'invalid_reply_to',
+        title: 'reply_to must be a message in this chat.',
+        detail: 'reply_to must be a message in this chat.',
+        message: '--reply-to must be a message in this chat.',
+        hint: /^chesly read <chat> shows its messages/m,
+      },
+    ];
+    for (const { args, status, code, title, detail, message, hint } of cases) {
+      const answer = () => problem(status, code, { title, detail });
+      mockFetch(answer);
+      const terminal = captureIo(true);
+      expect(await run(args, terminal.io), code).toBe(status === 404 ? 4 : 1);
+      expect(terminal.stderr.split('\n')[0], code).toBe(`Error: ${message} (request req_test)`);
+      expect(terminal.stderr, code).toMatch(hint);
+      expect(terminal.stderr, code).not.toMatch(/GET \/v1|account_id|reply_to/);
+
+      mockFetch(answer);
+      const piped = captureIo();
+      await run(args, piped.io);
+      expect(JSON.parse(piped.stderr), code).toEqual(problemBody(status, code, { title, detail }));
+    }
+  });
+
+  it('retry_in_is_said_once', async () => {
+    const limited = {
+      ...problemBody(429, 'rate_limited', { detail: 'This API key made more than 10 requests in one second. Retry in 1 s.' }),
+      retry_after: 1,
+    };
+    mockFetch(() => new Response(JSON.stringify(limited), { status: 429, headers: { 'content-type': 'application/problem+json' } }));
+    const terminal = captureIo(true);
+
+    expect(await run(['chats'], terminal.io)).toBe(5);
+
+    expect(terminal.stderr.match(/Retry in 1 s\./g)).toHaveLength(1);
+  });
+
+  it('chats_says_how_it_orders_and_what_it_leaves_out', async () => {
+    const help = captureIo();
+    expect(await run(['chats', '--help'], help.io)).toBe(0);
+    expect(help.stdout).toContain('pinned chats first, then the most recent');
+    expect(help.stdout).toContain('Archived chats are left out');
+    expect(help.stdout).not.toContain('most recent first');
+  });
+
   it('read_prints_oldest_first', async () => {
     serve({ [`/v1/chats/${MOM.id}/messages`]: () => json(200, MESSAGES) });
     const cap = captureIo(true);
