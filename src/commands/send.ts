@@ -92,6 +92,15 @@ Examples:
       const idempotencyKey = options.idempotencyKey ?? randomUUID();
       const uploaded = file === undefined ? undefined : await uploadFile(file, await key());
       const mediaId = uploaded?.id ?? options.mediaId;
+      // How to ask about this send again: the same key, and a file send names the upload it made (a
+      // new upload would be another media ID, which the same key refuses).
+      const again = {
+        flags:
+          uploaded === undefined
+            ? `--idempotency-key ${idempotencyKey}`
+            : `--media-id ${shellQuote(uploaded.id)} --idempotency-key ${idempotencyKey} (instead of --file)`,
+        extras: { idempotency_key: idempotencyKey, ...(mediaId === undefined ? {} : { media_id: mediaId }) },
+      };
       const answer = await idempotentPost<unknown>(`/v1/chats/${encodeURIComponent(target.id)}/messages`, {
         key: await key(),
         idempotencyKey,
@@ -100,25 +109,14 @@ Examples:
           ...(options.replyTo === undefined ? {} : { reply_to: options.replyTo }),
           ...(mediaId === undefined ? {} : { media_id: mediaId }),
         },
-        // Asked again, a file send names the upload it made: a new one would be another media ID.
-        ...(mediaId === undefined
-          ? {}
-          : {
-              again: {
-                flags:
-                  uploaded === undefined
-                    ? `--idempotency-key ${idempotencyKey}`
-                    : `--media-id ${shellQuote(mediaId)} --idempotency-key ${idempotencyKey} (instead of --file)`,
-                extras: { media_id: mediaId },
-              },
-            }),
+        again,
       });
       if (!isMessage(answer)) {
-        // The send was answered, so it may have gone out: the key asks the API for its answer again.
+        // The send was answered, so it may have gone out: asking again shows the API's answer.
         throw new AnnotatedError(
           new CliError('invalid_response', 'The API sent no message for the send.'),
-          { idempotency_key: idempotencyKey },
-          `It may have gone out. Run the command again with --idempotency-key ${idempotencyKey} to see the API's answer.`,
+          again.extras,
+          `It may have gone out. Run the command again with ${again.flags} to see the API's answer.`,
         );
       }
 
@@ -131,8 +129,8 @@ Examples:
         out.warn(
           'delivery_wait_failed',
           `The message was sent, but following its delivery failed (${waited.failure}). ` +
-            `chesly read shows it, and the same command with --idempotency-key ${idempotencyKey} shows the API's answer.`,
-          { idempotency_key: idempotencyKey },
+            `chesly read shows it, and the command run again with ${again.flags} shows the API's answer.`,
+          again.extras,
         );
       } else if (waited.stillQueued) {
         out.note(`Still queued after ${WAIT_MS / 1000} s.`);

@@ -188,6 +188,37 @@ describe('chesly send', () => {
     expect(JSON.parse(both.stderr)).toMatchObject({ code: 'usage_error' });
   });
 
+  it('a_file_sends_other_failures_name_its_upload_too', async () => {
+    // Whatever goes wrong after the upload, asking again names the media, never a new upload.
+    vi.useFakeTimers();
+    const photo = join(env.home, 'beach.jpg');
+    writeFileSync(photo, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+    const media = { id: 'media_aGVsbG8', mime_type: 'image/jpeg', size: 4, file_name: 'beach.jpg' };
+    const rerun = '--media-id media_aGVsbG8 --idempotency-key k-2 (instead of --file)';
+
+    // The send was answered with something that isn't a message.
+    serve({ '/v1/media': () => json(201, media), [SEND_PATH]: () => json(201, { ok: true }) });
+    const piped = captureIo();
+    expect(await run(['send', MOM.id, 'Look', '--file', photo, '--idempotency-key', 'k-2'], piped.io)).toBe(1);
+    expect(JSON.parse(piped.stderr)).toMatchObject({ code: 'invalid_response', idempotency_key: 'k-2', media_id: media.id });
+    serve({ '/v1/media': () => json(201, media), [SEND_PATH]: () => json(201, { ok: true }) });
+    const terminal = captureIo(true);
+    expect(await run(['send', MOM.id, 'Look', '--file', photo, '--idempotency-key', 'k-2'], terminal.io)).toBe(1);
+    expect(terminal.stderr).toContain(rerun);
+
+    // The send went out, but following it failed.
+    serve({
+      '/v1/media': () => json(201, media),
+      [SEND_PATH]: () => json(201, sent('queued', { type: 'image' })),
+      [`/v1/messages/${sent('queued').id}`]: () => problem(402, 'api_plan_required'),
+    });
+    const waited = captureIo();
+    expect(await runToEnd(['send', MOM.id, 'Look', '--file', photo, '--idempotency-key', 'k-2', '--wait'], waited.io)).toBe(0);
+    const warning = JSON.parse(waited.stderr);
+    expect(warning).toMatchObject({ warning: 'delivery_wait_failed', idempotency_key: 'k-2', media_id: media.id });
+    expect(warning.message).toContain(rerun);
+  });
+
   it('send_retries_with_the_same_key', async () => {
     vi.useFakeTimers();
     const calls = serve({
