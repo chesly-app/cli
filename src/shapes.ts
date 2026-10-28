@@ -17,8 +17,62 @@ export function expectAnswer<T>(answer: unknown, valid: (value: unknown) => valu
 /** `GET /v1/me`. Fields beyond `key` are rendered generically, so new ones show up without a CLI release. */
 export interface Me {
   key: { id: string; name: string; scope: string; api_version: string };
-  limits?: Record<string, unknown>;
+  limits?: Record<string, unknown> & { sends?: unknown };
   usage?: Record<string, unknown>;
+  /** The API plan, once billing is live. */
+  plan?: PlanSummary;
+}
+
+/** The API plan and this period's usage, from `GET /v1/me`. Amounts are in cents. */
+export interface PlanSummary {
+  status: 'none' | 'trialing' | 'active' | 'past_due' | 'canceled' | 'comped';
+  trial_ends_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  included_calls: number;
+  calls_this_period: number;
+  overage_calls: number;
+  transcription_seconds_this_period: number;
+  /** The $49 base plus overage and transcripts. */
+  estimated_amount_cents: number;
+  /** The cap on overage and transcripts, not on the base. */
+  spend_limit_cents: number;
+  billing_route: 'metered' | 'packs';
+  pack_balance_calls: number | null;
+}
+
+/** One connected account's send cap (`limits.sends` in `GET /v1/me`), over rolling windows. */
+export interface SendLimit {
+  account_id: string | null;
+  network: string;
+  per_hour: number;
+  per_day: number;
+  used_last_hour: number;
+  used_last_day: number;
+}
+
+export function isSendLimit(value: unknown): value is SendLimit {
+  return (
+    isRecord(value) &&
+    typeof value.network === 'string' &&
+    ['per_hour', 'per_day', 'used_last_hour', 'used_last_day'].every((field) => typeof value[field] === 'number')
+  );
+}
+
+/** An API key, as `GET /v1/keys` lists it: never the key, only its first 12 and last 4 characters. */
+export interface Key {
+  id: string;
+  name: string;
+  scope: 'full' | 'read';
+  prefix: string;
+  last4: string;
+  created_via: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export function isKeyList(value: unknown): value is { keys: Key[] } {
+  return isRecord(value) && Array.isArray(value.keys) && value.keys.every((key) => isRecord(key) && typeof key.id === 'string');
 }
 
 /** Whether `value` is a `/v1/me` answer with the key's details. An empty 2xx body, or `{}`, is not. */

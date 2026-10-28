@@ -6,11 +6,16 @@ import { formatTable, formatWhen, oneLine, terminalSafe } from './output.js';
 import {
   isMessage,
   isRecord,
+  isSendLimit,
   type Account,
   type ApiEvent,
   type Chat,
+  type Key,
+  type Me,
   type Message,
+  type PlanSummary,
   type SearchHit,
+  type SendLimit,
   type Webhook,
   type WebhookDelivery,
 } from './shapes.js';
@@ -217,6 +222,78 @@ export function deliveryTable(deliveries: readonly WebhookDelivery[]): string {
       formatWhen(delivery.last_attempt_at ?? delivery.created_at, { time: true }),
     ]),
   ]);
+}
+
+/** API keys as a table: only their first 12 and last 4 characters, and which one this CLI uses. */
+export function keyTable(keys: readonly Key[], inUse: { prefix: string; last4: string }): string {
+  return formatTable([
+    ['ID', 'SCOPE', 'KEY', 'MADE BY', 'CREATED', 'LAST USED', 'NAME'],
+    ...keys.map((key) => {
+      const mine = key.prefix === inUse.prefix && key.last4 === inUse.last4;
+      return [
+        key.id,
+        scopeLabel(key.scope),
+        `${oneLine(String(key.prefix), 12)}…${oneLine(String(key.last4), 4)}`,
+        oneLine(String(key.created_via), 20),
+        formatWhen(key.created_at),
+        formatWhen(key.last_used_at) || 'never',
+        `${oneLine(String(key.name), 60)}${mine ? ' (this CLI)' : ''}`,
+      ];
+    }),
+  ]);
+}
+
+const BILLING_URL = 'https://web.chesly.app/api/billing';
+
+/**
+ * `GET /v1/me` as a plan statement: the plan, this period's calls against the 50,000 included, the
+ * overage and the estimate, the limit beyond the plan, then each account's send cap. Before billing
+ * is live there is no plan, only the month's calls.
+ */
+export function usageSummary(me: Me): string {
+  const lines: string[] = [];
+  const plan = isRecord(me.plan) ? me.plan : undefined;
+  if (plan !== undefined) lines.push(planLine(plan));
+  if (plan !== undefined && plan.status !== 'none' && plan.status !== 'canceled') {
+    lines.push(`Calls this period: ${count(plan.calls_this_period)} of ${count(plan.included_calls)} included`);
+    if (plan.billing_route === 'packs' && typeof plan.pack_balance_calls === 'number') {
+      lines.push(`Call packs left: ${count(plan.pack_balance_calls)} calls`);
+    }
+    lines.push(`Overage: ${count(plan.overage_calls)} calls · Estimate this period: ${dollars(plan.estimated_amount_cents)}`);
+    lines.push(`Transcription this period: ${Math.ceil(Number(plan.transcription_seconds_this_period) / 60) || 0} min`);
+    lines.push(`Limit beyond the plan: ${dollars(plan.spend_limit_cents)}`);
+  } else if (isRecord(me.usage) && typeof me.usage.calls === 'number') {
+    lines.push(`Calls this month: ${count(me.usage.calls)}`);
+  }
+  const sends = Array.isArray(me.limits?.sends) ? me.limits.sends.filter(isSendLimit) : [];
+  if (sends.length > 0) lines.push('Sends:', ...sends.map((limit) => `  ${sendLimitLine(limit, sends)}`));
+  return lines.join('\n');
+}
+
+function planLine(plan: PlanSummary): string {
+  const status = oneLine(String(plan.status), 20);
+  if (plan.status === 'none' || plan.status === 'canceled') return `Plan: ${status}. Start one at ${BILLING_URL}`;
+  const trialEnds = plan.status === 'trialing' ? formatWhen(plan.trial_ends_at) : '';
+  return trialEnds === '' ? `Plan: ${status.replaceAll('_', ' ')}` : `Plan: ${status}, the trial ends ${trialEnds}`;
+}
+
+/** `whatsapp · 3/60 this hour · 3/250 today`, naming the account when one network has several. */
+function sendLimitLine(limit: SendLimit, all: readonly SendLimit[]): string {
+  const shared = all.filter((other) => other.network === limit.network).length > 1;
+  const network = oneLine(limit.network, 20);
+  const label = shared && limit.account_id ? `${network} (${oneLine(limit.account_id, 40)})` : network;
+  return `${label} · ${limit.used_last_hour}/${limit.per_hour} this hour · ${limit.used_last_day}/${limit.per_day} today`;
+}
+
+function count(value: unknown): string {
+  return Number(value ?? 0).toLocaleString('en-US');
+}
+
+/** `$49`, `$50.23`, `$10,000`: cents only when there are some. */
+function dollars(cents: unknown): string {
+  const amount = Number(cents ?? 0);
+  const digits = amount % 100 === 0 ? 0 : 2;
+  return `$${(amount / 100).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
 /** Oldest first. The API sends newest first, so reversing keeps messages sent in the same instant in order. */

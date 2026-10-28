@@ -4,11 +4,13 @@ import { registerAccounts } from './commands/accounts.js';
 import { registerCatchup } from './commands/catchup.js';
 import { registerChats } from './commands/chats.js';
 import { registerKey } from './commands/key.js';
+import { registerKeys } from './commands/keys.js';
 import { registerLogin } from './commands/login.js';
 import { registerLogout } from './commands/logout.js';
 import { registerRead } from './commands/read.js';
 import { registerSearch } from './commands/search.js';
 import { registerSend } from './commands/send.js';
+import { registerUsage } from './commands/usage.js';
 import { registerWatch } from './commands/watch.js';
 import { registerWebhooks } from './commands/webhooks.js';
 import { registerWhoami } from './commands/whoami.js';
@@ -70,6 +72,8 @@ function buildProgram(io: Io, json: boolean): Command {
   registerSend(program, io);
   registerWatch(program, io);
   registerWebhooks(program, io);
+  registerKeys(program, io);
+  registerUsage(program, io);
   return program;
 }
 
