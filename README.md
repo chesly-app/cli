@@ -78,8 +78,10 @@ in JSON mode). `chesly login --force` signs in anyway, with a new key.
 
 `chesly logout` revokes the key it stored, so the key stops working everywhere, then removes it from
 this computer. When it can't revoke it from here (offline, or a read-only key), it still signs out,
-and says the key is still active: revoke it with `chesly keys revoke <key_id>`, or in the dashboard at
-web.chesly.app/api. `CHESLY_API_KEY` is never touched.
+and names the key that is still active (its ID, first 12 and last 4 characters): revoke it with
+`chesly keys revoke <key_id>`, or in the dashboard at web.chesly.app/api/keys. In JSON mode the
+result lists each key as `{"id","prefix","last4","revoked"}`, and each one still active is also a
+`key_still_active` warning on stderr. `CHESLY_API_KEY` is never touched.
 
 ## Read your chats
 

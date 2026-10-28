@@ -770,7 +770,12 @@ describe('chesly logout and chesly key', () => {
     expect(storedWhenRevoked).toBe(KEY);
     expect(keychain.value).toBeNull();
     expect(existsSync(credentialsFile(env.home))).toBe(false);
-    expect(JSON.parse(piped.stdout)).toEqual({ removed: ['keychain', 'file'], revoked: true, env_key_set: false });
+    expect(JSON.parse(piped.stdout)).toEqual({
+      removed: ['keychain', 'file'],
+      revoked: true,
+      env_key_set: false,
+      keys: [{ id: 'key_1', prefix: KEY.slice(0, 12), last4: KEY.slice(-4), revoked: true }],
+    });
     expect(piped.stderr).toBe('');
 
     keychain.value = KEY;
@@ -795,17 +800,27 @@ describe('chesly logout and chesly key', () => {
       const piped = captureIo();
       expect(await run(['logout'], piped.io)).toBe(0);
       expect(keychain.value).toBeNull();
-      expect(JSON.parse(piped.stdout)).toEqual({ removed: ['keychain'], revoked: false, env_key_set: false });
+      const still = { id: 'key_1', prefix: KEY.slice(0, 12), last4: KEY.slice(-4) };
+      expect(JSON.parse(piped.stdout)).toEqual({
+        removed: ['keychain'],
+        revoked: false,
+        env_key_set: false,
+        keys: [{ ...still, revoked: false }],
+      });
+      // Which key, and where to revoke it.
       expect(JSON.parse(piped.stderr)).toEqual({
         warning: 'key_still_active',
-        message: 'This key is still active; revoke it in the dashboard at web.chesly.app/api.',
+        message: 'This key (ck_live_Ab3d…WxYz, id key_1) is still active; revoke it in the dashboard at web.chesly.app/api/keys.',
+        ...still,
       });
 
       keychain.value = KEY;
       mockFetch((call) => (call.method === 'DELETE' ? refusal() : json(200, ME)));
       const terminal = captureIo(true);
       expect(await run(['logout'], terminal.io)).toBe(0);
-      expect(terminal.stdout).toContain('This key is still active; revoke it in the dashboard at web.chesly.app/api.');
+      expect(terminal.stdout).toContain(
+        'This key (ck_live_Ab3d…WxYz, id key_1) is still active; revoke it in the dashboard at web.chesly.app/api/keys.',
+      );
     }
 
     // A key the API already refuses is gone: nothing to revoke, nothing to warn about.
@@ -813,7 +828,12 @@ describe('chesly logout and chesly key', () => {
     mockFetch(() => problem(401, 'invalid_api_key'));
     const gone = captureIo();
     expect(await run(['logout'], gone.io)).toBe(0);
-    expect(JSON.parse(gone.stdout)).toEqual({ removed: ['keychain'], revoked: true, env_key_set: false });
+    expect(JSON.parse(gone.stdout)).toEqual({
+      removed: ['keychain'],
+      revoked: true,
+      env_key_set: false,
+      keys: [{ id: null, prefix: KEY.slice(0, 12), last4: KEY.slice(-4), revoked: true }],
+    });
     expect(gone.stderr).toBe('');
 
     // Nothing stored: no request at all. CHESLY_API_KEY is never revoked by logout.
