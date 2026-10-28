@@ -272,7 +272,7 @@ included, on every network but email (add `--network email` for email threads):
   | 2 | usage |
   | 3 | not signed in (no key, a malformed one, or the key was rejected) |
   | 4 | not found (an unknown chat, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
-  | 5 | rate limited (too many requests, a send cap, or too many open event streams) |
+  | 5 | temporary, retry later: rate limited (a 429: too many requests, a send cap, or too many open event streams) or briefly unavailable (a 503). `retry_after` says when, if the answer has it |
   | 6 | payment required: the account needs an API plan, or a limit of its plan is reached |
 
 - **MCP:** give Claude Code the Chesly MCP server with your key:

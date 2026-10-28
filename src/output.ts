@@ -221,7 +221,7 @@ function describeFailure(error: unknown): Failure {
   if (error instanceof CheslyApiError) {
     return {
       message: error.message,
-      exitCode: exitCodeForStatus(error.status),
+      exitCode: exitCodeFor(error),
       problem: error.problem,
       requestId: error.requestId,
       hint: hintFor(error),
@@ -242,11 +242,16 @@ function describeFailure(error: unknown): Failure {
   return { message, exitCode: EXIT.ERROR, problem: cliProblem('internal_error', message) };
 }
 
-function exitCodeForStatus(status: number): ExitCode {
-  if (status === 401) return EXIT.NOT_SIGNED_IN;
-  if (status === 402) return EXIT.PAYMENT_REQUIRED;
-  if (status === 404) return EXIT.NOT_FOUND;
-  if (status === 429) return EXIT.RATE_LIMITED;
+/**
+ * The exit code for an API error. A 400 invalid_request is a usage error, as one the CLI finds is.
+ * Every 429 and 503 is "temporary, retry later", with retry_after or not.
+ */
+function exitCodeFor(error: CheslyApiError): ExitCode {
+  if (error.status === 400 && error.code === 'invalid_request') return EXIT.USAGE;
+  if (error.status === 401) return EXIT.NOT_SIGNED_IN;
+  if (error.status === 402) return EXIT.PAYMENT_REQUIRED;
+  if (error.status === 404) return EXIT.NOT_FOUND;
+  if (error.status === 429 || error.status === 503) return EXIT.RETRY_LATER;
   return EXIT.ERROR;
 }
 

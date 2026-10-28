@@ -269,8 +269,10 @@ describe('read commands', () => {
       [['chats', '--limit', '101'], /argument '101' is invalid\. Use a whole number from 1 to 100\.$/],
       [['read', MOM.id, '--limit', 'ten'], /argument 'ten' is invalid\. Use a whole number from 1 to 100\.$/],
       [['search', 'lunch', '--limit', '2.5'], /argument '2\.5' is invalid\. Use a whole number from 1 to 100\.$/],
-      [['catchup', '--chats', '0'], /'--chats <n>' argument '0' is invalid\. Use a whole number from 1 up\.$/],
-      [['catchup', '--per-chat', 'many'], /'--per-chat <n>' argument 'many' is invalid\. Use a whole number from 1 up\.$/],
+      [['catchup', '--chats', '0'], /'--chats <n>' argument '0' is invalid\. Use a whole number from 1 to 50\.$/],
+      [['catchup', '--chats', '51'], /'--chats <n>' argument '51' is invalid\. Use a whole number from 1 to 50\.$/],
+      [['catchup', '--per-chat', 'many'], /'--per-chat <n>' argument 'many' is invalid\. Use a whole number from 1 to 20\.$/],
+      [['catchup', '--per-chat', '21'], /'--per-chat <n>' argument '21' is invalid\. Use a whole number from 1 to 20\.$/],
     ];
     for (const [args, title] of cases) {
       const cap = captureIo();

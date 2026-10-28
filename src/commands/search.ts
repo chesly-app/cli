@@ -18,7 +18,7 @@ export function registerSearch(program: Command, io: Io): void {
   program
     .command('search')
     .description('Search your messages, across every chat or in one')
-    .argument('<query>', 'the words to look for')
+    .argument('<query>', 'the words to look for, at most 200 characters')
     .option('--chat <chat>', 'only this chat: a chat ID (chat_…) or a chat name')
     .option('--limit <n>', 'how many messages, 1 to 100', parseLimit)
     .option('--network <name>', 'only this network: email, whatsapp, telegram… (email only when named)', parseNetwork)

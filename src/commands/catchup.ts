@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
-import { parseCount, parseNetwork } from '../options.js';
+import { parseNetwork, upTo } from '../options.js';
 import { Output, indent, oneLine, type Io } from '../output.js';
 import { transcript } from '../render.js';
 import type { CatchUp } from '../shapes.js';
@@ -16,8 +16,8 @@ export function registerCatchup(program: Command, io: Io): void {
   program
     .command('catchup')
     .description('Unread chats with their latest messages, in one call')
-    .option('--chats <n>', 'how many chats (default 20)', parseCount)
-    .option('--per-chat <n>', 'how many messages from each chat (default 5)', parseCount)
+    .option('--chats <n>', 'how many chats, 1 to 50 (default 20)', upTo(50))
+    .option('--per-chat <n>', 'how many messages from each chat, 1 to 20 (default 5)', upTo(20))
     .option('--network <name>', 'only this network: email, whatsapp, telegram… (email only when named)', parseNetwork)
     .addHelpText(
       'after',

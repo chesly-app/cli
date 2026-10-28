@@ -12,11 +12,13 @@ export function parseLimit(value: string): number {
   return limit;
 }
 
-/** A count such as `--chats`: a whole number from 1. The API sets the most it accepts. */
-export function parseCount(value: string): number {
-  const count = wholeNumber(value);
-  if (count === undefined) throw new InvalidArgumentError('Use a whole number from 1 up.');
-  return count;
+/** A count such as `--chats`: a whole number from 1 to `max`, the most the API accepts, checked before any request. */
+export function upTo(max: number): (value: string) => number {
+  return (value) => {
+    const count = wholeNumber(value);
+    if (count === undefined || count > max) throw new InvalidArgumentError(`Use a whole number from 1 to ${max}.`);
+    return count;
+  };
 }
 
 /** `--network`: one network's name, such as email or whatsapp, in lowercase as the API names them. */

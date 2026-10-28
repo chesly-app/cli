@@ -5,7 +5,8 @@ export const EXIT = {
   USAGE: 2,
   NOT_SIGNED_IN: 3,
   NOT_FOUND: 4,
-  RATE_LIMITED: 5,
+  /** Temporary: a 429 (too many requests, a send cap) or a 503 (briefly unavailable). Retry later. */
+  RETRY_LATER: 5,
   /** A 402: the account needs an API plan, or its plan's limits are reached. */
   PAYMENT_REQUIRED: 6,
 } as const;

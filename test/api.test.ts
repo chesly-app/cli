@@ -174,6 +174,15 @@ describe('output and exit codes', () => {
     [429, 'rate_limited', 5],
     [403, 'insufficient_scope', 1],
     [500, 'internal_error', 1],
+    // The API finding a usage error is a usage error, as the CLI finding one is.
+    [400, 'invalid_request', 2],
+    [400, 'text_too_long', 1],
+    // 5 means "temporary: retry later", for every 429 and every 503, with or without retry_after.
+    [503, 'upstream_unavailable', 5],
+    [503, 'search_unavailable', 5],
+    [503, 'feed_unavailable', 5],
+    [503, 'network_unavailable', 5],
+    [502, 'http_502', 1],
   ])('an_api_%i_%s_exits_%i', async (status, code, exitCode) => {
     vi.stubEnv('CHESLY_API_KEY', KEY);
     mockFetch(() => problem(status, code, { request_id: 'req_xyz' }, { 'retry-after': '7' }));
@@ -208,9 +217,9 @@ describe('output and exit codes', () => {
       new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/problem+json', ...headers } });
     const cases: Array<[() => Response, Record<string, unknown>, number, string]> = [
       [problemJson(429, limited), limited, 5, 'Retry in 7 s.'],
-      [problemJson(503, down, { 'retry-after': '30' }), down, 1, 'Retry in 30 s.'],
+      [problemJson(503, down, { 'retry-after': '30' }), down, 5, 'Retry in 30 s.'],
       // `retry_after` in the body wins over the header.
-      [problemJson(503, { ...down, retry_after: 12 }, { 'retry-after': '60' }), { ...down, retry_after: 12 }, 1, 'Retry in 12 s.'],
+      [problemJson(503, { ...down, retry_after: 12 }, { 'retry-after': '60' }), { ...down, retry_after: 12 }, 5, 'Retry in 12 s.'],
     ];
 
     for (const [answer, sent, exitCode, hint] of cases) {
@@ -253,7 +262,7 @@ describe('output and exit codes', () => {
     vi.stubEnv('CHESLY_API_KEY', KEY);
     const byContentType = { type: 'about:blank', title: 'Bad Gateway', status: 502 };
     const byType = { type: 'https://api.test/errors#maintenance', title: 'Down for maintenance', status: 503, detail: 'Back at 10:00.' };
-    const answers: Array<[() => Response, Record<string, unknown>]> = [
+    const answers: Array<[() => Response, Record<string, unknown>, number]> = [
       [
         () =>
           new Response(JSON.stringify(byContentType), {
@@ -261,13 +270,14 @@ describe('output and exit codes', () => {
             headers: { 'content-type': 'application/problem+json; charset=utf-8' },
           }),
         byContentType,
+        1,
       ],
-      [() => json(503, byType), byType],
+      [() => json(503, byType), byType, 5],
     ];
-    for (const [answer, sent] of answers) {
+    for (const [answer, sent, exitCode] of answers) {
       mockFetch(answer);
       const cap = captureIo();
-      expect(await run(['whoami'], cap.io)).toBe(1);
+      expect(await run(['whoami'], cap.io)).toBe(exitCode);
       expect(JSON.parse(cap.stderr)).toEqual(sent);
     }
 
