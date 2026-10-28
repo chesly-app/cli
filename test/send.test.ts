@@ -148,6 +148,46 @@ describe('chesly send', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('a_file_send_that_gives_up_is_finished_with_its_media_id_not_a_new_upload', async () => {
+    // A new upload mints a new media_id, and the same key with another body is a 422: a retry of a
+    // file send names the media it already uploaded.
+    vi.useFakeTimers();
+    const photo = join(env.home, 'beach.jpg');
+    writeFileSync(photo, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+    const media = { id: 'media_aGVsbG8', mime_type: 'image/jpeg', size: 4, file_name: 'beach.jpg' };
+    let calls = serve({
+      '/v1/media': () => json(201, media),
+      [SEND_PATH]: () => Promise.reject(new TypeError('fetch failed')),
+    });
+
+    const piped = captureIo();
+    expect(await runToEnd(['send', MOM.id, 'Look', '--file', photo], piped.io)).toBe(1);
+    const key = sends(calls)[0]?.headers['idempotency-key'];
+    expect(JSON.parse(piped.stderr)).toMatchObject({ code: 'network_error', idempotency_key: key, media_id: media.id });
+
+    serve({ '/v1/media': () => json(201, media), [SEND_PATH]: () => Promise.reject(new TypeError('fetch failed')) });
+    const terminal = captureIo(true);
+    expect(await runToEnd(['send', MOM.id, 'Look', '--file', photo, '--idempotency-key', 'k-1'], terminal.io)).toBe(1);
+    expect(terminal.stderr).toContain('run the command again with --media-id media_aGVsbG8 --idempotency-key k-1 (instead of --file)');
+
+    // The recovery run: no upload, the same key and the same body, and the API replays the first answer.
+    calls = serve({
+      '/v1/media': () => json(201, { ...media, id: 'media_new' }),
+      [SEND_PATH]: () => json(201, sent('sent', { type: 'image', text: 'Look' }), { 'idempotent-replayed': 'true' }),
+    });
+    const again = captureIo();
+    expect(await run(['send', MOM.id, 'Look', '--media-id', media.id, '--idempotency-key', String(key)], again.io)).toBe(0);
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([SEND_PATH]);
+    expect(calls[0]?.headers['idempotency-key']).toBe(key);
+    expect(calls[0]?.body).toEqual({ text: 'Look', media_id: media.id });
+    expect(JSON.parse(again.stdout)).toMatchObject({ delivery: { status: 'sent' } });
+
+    // One attachment: a file or a media ID, not both.
+    const both = captureIo();
+    expect(await run(['send', MOM.id, '--file', photo, '--media-id', media.id], both.io)).toBe(2);
+    expect(JSON.parse(both.stderr)).toMatchObject({ code: 'usage_error' });
+  });
+
   it('send_retries_with_the_same_key', async () => {
     vi.useFakeTimers();
     const calls = serve({

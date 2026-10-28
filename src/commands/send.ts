@@ -4,7 +4,7 @@ import { CheslyApiError, apiRequest, idempotentPost, isTransient, sleep } from '
 import { keyOnce } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { parseIdempotencyKey, parseNetwork } from '../options.js';
-import { Output, type Io } from '../output.js';
+import { Output, shellQuote, type Io } from '../output.js';
 import { sentLine } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
 import { isMessage, type Message } from '../shapes.js';
@@ -13,6 +13,7 @@ import { readUpload, uploadFile } from '../upload.js';
 interface SendOptions {
   replyTo?: string;
   file?: string;
+  mediaId?: string;
   wait?: boolean;
   idempotencyKey?: string;
   network?: string;
@@ -30,6 +31,7 @@ export function registerSend(program: Command, io: Io): void {
     .argument('[text]', 'the text to send; - reads it from stdin')
     .option('--reply-to <msg_id>', 'reply to this message: a msg_ ID from chesly read')
     .option('--file <path>', 'attach this file (at most 50 MB); the text becomes its caption')
+    .option('--media-id <id>', 'attach a file uploaded before (a media_ ID), as a retry of a file send does')
     .option('--wait', 'wait up to 30 s until the network has it: sent, delivered or failed')
     .option(
       '--idempotency-key <key>',
@@ -50,7 +52,9 @@ delivery exits 1 with the reason.
 Every send carries an Idempotency-Key, and the CLI's own retries (after a
 network error, a 502, 503 or 504, or while a first attempt is still running)
 reuse it, so the message goes out at most once. To retry later without
-sending twice, pass the same --idempotency-key again.
+sending twice, pass the same --idempotency-key again. A file send that gives
+up also names its upload: retry it with --media-id <id> instead of --file, as
+a new upload would make another media ID, which the same key refuses (422).
 
 Text that starts with - goes after --:  chesly send Mom -- "-5 degrees here"
 
@@ -62,7 +66,10 @@ Examples:
     .action(async (chat: string, text: string | undefined, options: SendOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const body = await messageText(text, io);
-      if (body === undefined && options.file === undefined) {
+      if (options.file !== undefined && options.mediaId !== undefined) {
+        throw new CliError('usage_error', 'A message carries one attachment: give --file or --media-id, not both.', EXIT.USAGE);
+      }
+      if (body === undefined && options.file === undefined && options.mediaId === undefined) {
         throw new CliError('usage_error', 'Give the text to send, - to read it from stdin, or --file.', EXIT.USAGE);
       }
       // A file that can't be sent fails here, before the chat lookup or any other request.
@@ -70,15 +77,28 @@ Examples:
       const key = keyOnce();
       const target = await resolveChat(chat, key, { network: options.network });
       const idempotencyKey = options.idempotencyKey ?? randomUUID();
-      const media = file === undefined ? undefined : await uploadFile(file, await key());
+      const uploaded = file === undefined ? undefined : await uploadFile(file, await key());
+      const mediaId = uploaded?.id ?? options.mediaId;
       const answer = await idempotentPost<unknown>(`/v1/chats/${encodeURIComponent(target.id)}/messages`, {
         key: await key(),
         idempotencyKey,
         body: {
           ...(body === undefined ? {} : { text: body }),
           ...(options.replyTo === undefined ? {} : { reply_to: options.replyTo }),
-          ...(media === undefined ? {} : { media_id: media.id }),
+          ...(mediaId === undefined ? {} : { media_id: mediaId }),
         },
+        // Asked again, a file send names the upload it made: a new one would be another media ID.
+        ...(mediaId === undefined
+          ? {}
+          : {
+              again: {
+                flags:
+                  uploaded === undefined
+                    ? `--idempotency-key ${idempotencyKey}`
+                    : `--media-id ${shellQuote(mediaId)} --idempotency-key ${idempotencyKey} (instead of --file)`,
+                extras: { media_id: mediaId },
+              },
+            }),
       });
       if (!isMessage(answer)) throw new CliError('invalid_response', 'The API sent no message for the send.');
 

@@ -172,12 +172,20 @@ const MAX_IN_PROGRESS_WAIT_S = 10;
  *   and then 2 s apart, or the answer's Retry-After when longer. Asking again replays the first
  *   attempt's answer once there is one, or takes over its work.
  * Giving up without knowing what happened, it adds the key to the error (`idempotency_key`) and says
- * how to ask again with it.
+ * how to ask again with it. `again` changes that: the flags to run the command again with, and more
+ * members (a send that uploaded a file asks again with `--media-id`, never a second upload).
  */
 export async function idempotentPost<T>(
   path: string,
-  init: { key: string; idempotencyKey: string; body?: unknown },
+  init: {
+    key: string;
+    idempotencyKey: string;
+    body?: unknown;
+    again?: { flags: string; extras: Readonly<Record<string, unknown>> };
+  },
 ): Promise<T> {
+  const flags = init.again?.flags ?? `--idempotency-key ${init.idempotencyKey}`;
+  const extras = { idempotency_key: init.idempotencyKey, ...init.again?.extras };
   let failures = 0;
   let inProgress = 0;
   for (;;) {
@@ -193,8 +201,8 @@ export async function idempotentPost<T>(
         if (++inProgress >= MAX_IN_PROGRESS) {
           throw new AnnotatedError(
             error,
-            { idempotency_key: init.idempotencyKey },
-            `The first attempt is still running. Run the command again with --idempotency-key ${init.idempotencyKey} to see its result.`,
+            extras,
+            `The first attempt is still running. Run the command again with ${flags} to see its result.`,
           );
         }
         const backoff = 2 ** (inProgress - 1);
@@ -206,8 +214,8 @@ export async function idempotentPost<T>(
       if (delay === undefined) {
         throw new AnnotatedError(
           error,
-          { idempotency_key: init.idempotencyKey },
-          `It may have gone through. To retry without repeating it, run the command again with --idempotency-key ${init.idempotencyKey}.`,
+          extras,
+          `It may have gone through. To retry without repeating it, run the command again with ${flags}.`,
         );
       }
       await sleep(delay);

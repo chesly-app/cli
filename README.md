@@ -115,6 +115,7 @@ chesly send "Mom" "On my way" --wait                 # wait until the network ha
 echo "Running late" | chesly send "Mom" -            # the text from stdin
 chesly send "Mom" "Yes" --reply-to msg_...           # a reply
 chesly send "Mom" "The plan" --file plan.pdf         # a file (at most 50 MB), the text its caption
+chesly send "Mom" "The plan" --media-id media_...    # a file uploaded before (a retry of a file send)
 ```
 
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
@@ -135,7 +136,9 @@ and 2 seconds), and asks again while a first attempt is still running (409
 key, so a flaky connection never sends a message twice. When it gives up without knowing whether
 the message went out, the error carries the key as `idempotency_key`: run the command again with
 `--idempotency-key <that key>`, and the API answers with the first attempt's result instead of
-sending again.
+sending again. A file send's error also carries its upload as `media_id`: retry with
+`--media-id <that id>` instead of `--file`, since a new upload would be a new media ID, which the
+same key refuses (422 `idempotency_key_reused`).
 
 ## Watch events
 
@@ -246,7 +249,7 @@ With `--json` it prints the API's `GET /v1/me` answer.
 | `chesly read <chat> [--network <name>] [--limit <n>] [--cursor <cursor>]` | Shows a chat's latest messages, oldest first in a terminal (`GET /v1/chats/{chat_id}/messages`) |
 | `chesly search <query> [--chat <chat>] [--network <name>] [--limit <n>]` | Searches your messages, in every chat or one (`GET /v1/messages/search`) |
 | `chesly catchup [--chats <n>] [--per-chat <n>] [--network <name>]` | Your unread chats (not muted or archived) with their latest messages, in one call (`GET /v1/catch_up`) |
-| `chesly send <chat> [text\|-] [--reply-to <msg_id>] [--file <path>] [--wait] [--idempotency-key <key>] [--network <name>]` | Sends a message, a reply or a file (`POST /v1/media`, `POST /v1/chats/{chat_id}/messages`) |
+| `chesly send <chat> [text\|-] [--reply-to <msg_id>] [--file <path>\|--media-id <id>] [--wait] [--idempotency-key <key>] [--network <name>]` | Sends a message, a reply or a file (`POST /v1/media`, `POST /v1/chats/{chat_id}/messages`) |
 | `chesly watch [--chat <chat>] [--account <acct_id>] [--types <a,b>] [--networks <a,b>] [--after <evt_id>]` | Prints events as they happen, one per line (`GET /v1/events/stream`) |
 | `chesly webhooks list\|create\|delete\|rotate\|test\|deliveries` | Manages webhooks (`/v1/webhooks`) |
 | `chesly keys list\|revoke <key_id>` | Lists or revokes API keys (`/v1/keys`) |
