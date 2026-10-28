@@ -149,7 +149,8 @@ A file can be at most 50 MB (50,000,000 bytes); a bigger one is refused before a
 
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
 takes it; `--wait` checks every second, within 30 seconds in all, until it is `sent`, `delivered`
-or `failed`. Each check is a metered API call. A failure the network confirms exits 1
+or `failed` (`delivered` comes only where the network reports it, as iMessage does; elsewhere a
+send ends at `sent`). Each check is a metered API call. A failure the network confirms exits 1
 (`delivery_failed`) and says why. One it didn't confirm (`delivery.error.certain: false`: a timeout,
 or an error the network didn't explain) reads `unconfirmed`, because the message may have been
 delivered: check the chat before you send it again. `--wait` goes on asking, since such a failure
