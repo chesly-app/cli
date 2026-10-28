@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import type { Command } from 'commander';
-import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey, sleep } from '../api.js';
+import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey, isLoopbackHost, sleep } from '../api.js';
 import { describeSource, storeKey, type KeyStore } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { Output, oneLine, terminalSafe, type Io } from '../output.js';
@@ -21,7 +21,7 @@ export function registerLogin(program: Command, io: Io): void {
   program
     .command('login')
     .description('Sign in: approve this computer on web.chesly.app, or store a key with --key')
-    .option('--key <key>', 'check this API key with the API, then store it (no browser)')
+    .option('--key <key>', 'check an API key with the API, then store it (no browser); - reads it from stdin')
     .addHelpText(
       'after',
       `
@@ -34,15 +34,34 @@ In JSON mode the link and the code are one line on stderr:
 The key goes to the OS keychain, or to ~/.config/chesly/credentials.json
 (mode 0600) where there is no keychain. CHESLY_API_KEY, when set, wins over it.
 
+Pass a key through stdin (--key -), never as an argument: an argument shows
+in the process list and the shell history. In CI, set CHESLY_API_KEY instead.
+
 Examples:
   chesly login
-  chesly login --key ck_live_...`,
+  chesly login --key - < chesly-key.txt`,
     )
     .action(async (options: { key?: string }, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
-      if (options.key !== undefined) await loginWithKey(out, options.key.trim());
+      if (options.key !== undefined) await loginWithKey(out, (await keyArgument(options.key, io)).trim());
       else await loginInBrowser(out);
     });
+}
+
+/**
+ * `--key`'s value, or for `--key -` the key piped to stdin, which keeps it out of the process list
+ * and the shell history. A terminal on stdin is a usage error: reading it would be a prompt.
+ */
+async function keyArgument(value: string, io: Io): Promise<string> {
+  if (value !== '-') return value;
+  if (io.stdin.isTTY) {
+    throw new CliError(
+      'usage_error',
+      '--key - reads the key from stdin, and stdin is a terminal. Pipe the key in, or set CHESLY_API_KEY.',
+      EXIT.USAGE,
+    );
+  }
+  return io.stdin.read();
 }
 
 async function loginWithKey(out: Output, key: string): Promise<void> {
@@ -244,7 +263,7 @@ function isWebUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.protocol === 'https:') return true;
-    return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    return url.protocol === 'http:' && isLoopbackHost(url.hostname);
   } catch {
     return false;
   }

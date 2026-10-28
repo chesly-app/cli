@@ -406,6 +406,26 @@ describe('output and exit codes', () => {
     expect(calls[0]?.url).toBe('http://localhost:3000/v1/me');
   });
 
+  it('an_http_api_url_must_be_this_computer', async () => {
+    // Over http:// the key travels in clear text: only to this computer, for a local API.
+    vi.stubEnv('CHESLY_API_KEY', KEY);
+    const calls = mockFetch(() => json(200, ME));
+
+    for (const url of ['http://api.chesly.app', 'http://192.168.1.20:3000', 'http://localhost.example.com']) {
+      vi.stubEnv('CHESLY_API_URL', url);
+      const cap = captureIo();
+      expect(await run(['whoami'], cap.io), url).toBe(1);
+      expect(JSON.parse(cap.stderr), url).toMatchObject({ code: 'invalid_api_url' });
+    }
+    expect(calls).toHaveLength(0);
+
+    for (const url of ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000', 'https://api.example.com']) {
+      vi.stubEnv('CHESLY_API_URL', url);
+      expect(await run(['whoami'], captureIo().io), url).toBe(0);
+    }
+    expect(calls).toHaveLength(4);
+  });
+
   it('help_lists_every_command_and_the_exit_codes', async () => {
     const cap = captureIo();
 

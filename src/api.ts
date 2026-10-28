@@ -17,17 +17,31 @@ export function isApiKey(value: unknown): value is string {
   return typeof value === 'string' && KEY_FORMAT.test(value);
 }
 
-/** `CHESLY_API_URL` without a trailing slash, or https://api.chesly.app. Only http:// and https:// URLs. */
+/**
+ * `CHESLY_API_URL` without a trailing slash, or https://api.chesly.app. Only https:// URLs, and
+ * http:// for this computer alone (a local API): over http:// the key would travel in clear text.
+ */
 function apiBaseUrl(): string {
   const configured = process.env.CHESLY_API_URL?.trim();
   const base = (configured || DEFAULT_API_URL).replace(/\/+$/, '');
   if (!URL.canParse(base)) throw new CliError('invalid_api_url', 'CHESLY_API_URL is not a valid URL.');
   // `localhost:3000` parses too, as a URL whose scheme is "localhost:".
-  const { protocol } = new URL(base);
+  const { protocol, hostname } = new URL(base);
   if (protocol !== 'https:' && protocol !== 'http:') {
-    throw new CliError('invalid_api_url', 'CHESLY_API_URL must start with http:// or https://, like https://api.chesly.app.');
+    throw new CliError('invalid_api_url', 'CHESLY_API_URL must start with https://, like https://api.chesly.app.');
+  }
+  if (protocol === 'http:' && !isLoopbackHost(hostname)) {
+    throw new CliError(
+      'invalid_api_url',
+      'CHESLY_API_URL may use http:// only for this computer (localhost, 127.0.0.1 or [::1]); use https://.',
+    );
   }
   return base;
+}
+
+/** This computer: localhost, 127.x.x.x or [::1], as a URL's hostname gives them. */
+export function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
 }
 
 export type QueryValue = string | number | boolean | undefined;

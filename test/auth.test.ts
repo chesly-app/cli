@@ -77,6 +77,32 @@ describe('chesly login', () => {
     expect(JSON.parse(cap.stderr)).toEqual(problemBody(401, 'invalid_api_key', { title: 'Invalid API key' }));
   });
 
+  it('login_reads_the_key_from_stdin_with_a_dash', async () => {
+    // A key in argv shows in the process list and the shell history; stdin keeps it out of both.
+    const calls = mockFetch(() => json(200, ME));
+
+    const piped = captureIo(false, { text: `  ${KEY}\n` });
+    expect(await run(['login', '--key', '-'], piped.io)).toBe(0);
+    expect(piped.stdinReads).toBe(1);
+    expect(keychain.value).toBe(KEY);
+    expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
+
+    // Never from a terminal: that would be a prompt.
+    keychain.value = null;
+    const terminal = captureIo(true, { isTTY: true });
+    expect(await run(['login', '--key', '-'], terminal.io)).toBe(2);
+    expect(terminal.stdinReads).toBe(0);
+    expect(terminal.stderr).toMatch(/stdin is a terminal/);
+
+    // Anything else on stdin is refused like a bad --key, and never echoed.
+    const junk = captureIo(false, { text: 'csk_SECRET_old_token\n' });
+    expect(await run(['login', '--key', '-'], junk.io)).toBe(2);
+    expect(JSON.parse(junk.stderr)).toMatchObject({ code: 'invalid_key_format' });
+    expect(junk.stderr).not.toContain('SECRET');
+    expect(keychain.value).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
   it('login_refuses_something_that_is_not_a_key', async () => {
     const calls = mockFetch(() => json(200, ME));
     const cap = captureIo();

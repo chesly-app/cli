@@ -23,8 +23,8 @@ Once the repo is public, one line does it: `npm i -g github:chesly-app/cli`.
 ## Sign in
 
 ```sh
-chesly login                     # approve the code on web.chesly.app
-chesly login --key ck_live_...   # or store a key you already have (checked first)
+chesly login                              # approve the code on web.chesly.app
+chesly login --key - < chesly-key.txt     # or store a key you already have (checked first)
 ```
 
 `chesly login` prints a link and a code, opens your browser when it runs in a terminal, and waits
@@ -45,7 +45,9 @@ and succeeds (after up to 20 seconds when the keychain doesn't answer), and only
 in the file fails with that code, as does `chesly logout`, which still removes the file and lists
 what it removed in `removed`.
 
-For CI and servers, set `CHESLY_API_KEY` instead. It wins over the stored key.
+`--key -` reads the key from stdin. Never put a key itself on the command line: it would show in the
+process list and your shell history. For CI and servers, set `CHESLY_API_KEY` instead. It wins over
+the stored key.
 
 `chesly logout` removes the key from this computer. The key itself keeps working until you revoke
 it: `chesly keys revoke <key_id>`, or the dashboard at https://web.chesly.app/api/keys.
@@ -263,7 +265,7 @@ included, on every network but email (add `--network email` for email threads):
 - **Other people's text** (names, messages) never reaches the terminal raw: tables drop escape
   sequences and other control characters, and JSON escapes them, so the parsed text is exact.
 - **Keys** are checked before they are sent, stored or shown: `ck_live_` and 48 letters, digits,
-  `_` or `-`. A malformed `CHESLY_API_KEY` or stored key exits 3, and a malformed
+  `_` or `-`. A malformed `CHESLY_API_KEY` or stored key exits 3, and a malformed key given to
   `chesly login --key` exits 2 (usage). Neither is ever printed.
 - **Nothing prompts**, ever. `-` reads stdin only when you pass it, and never a terminal.
 - **Exit codes:**
@@ -290,7 +292,7 @@ included, on every network but email (add `--network email` for email threads):
 | Variable | Use |
 |---|---|
 | `CHESLY_API_KEY` | The API key to use instead of the stored one |
-| `CHESLY_API_URL` | The API base URL, `http://` or `https://` (default `https://api.chesly.app`) |
+| `CHESLY_API_URL` | The API base URL (default `https://api.chesly.app`): `https://`, or `http://` only for this computer (`localhost`, `127.0.0.1`, `[::1]`), since the key would travel in clear text |
 
 ## Development
 
