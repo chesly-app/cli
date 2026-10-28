@@ -19,9 +19,10 @@ interface SendOptions {
   network?: string;
 }
 
-/** How long --wait follows a message, polls included, and how often it asks. */
+/** How long --wait follows a message, polls included, how often it asks, and the least time a poll gets. */
 const WAIT_MS = 30_000;
 const POLL_MS = 1_000;
+const MIN_POLL_MS = 1_000;
 
 /** What --wait saw: the last message it got, and how the wait ended when not on a final status. */
 interface Waited {
@@ -164,16 +165,17 @@ async function messageText(text: string | undefined, io: Io): Promise<string | u
 
 /**
  * Polls `GET /v1/messages/{id}` once a second until the delivery is sent, delivered or failed, within
- * one 30 s deadline: each poll gets only the time left. The message went out either way, so nothing
- * here throws. A poll that fails for a moment (no answer, a 5xx, a 429) is tried again until the
- * deadline; any other failure (401, 402, 404, an answer that isn't a message) ends the wait at once.
+ * one 30 s deadline: each poll gets only the time left, and none starts with less than 1 s. The
+ * message went out either way, so nothing here throws. A poll the deadline cuts off leaves it still
+ * queued. A poll that fails for a moment (no answer, a 5xx, a 429) is tried again until the deadline;
+ * any other failure (401, 402, 404, an answer that isn't a message) ends the wait at once.
  */
 async function waitForDelivery(sent: Message, key: string): Promise<Waited> {
   let message = sent;
   let failure: string | undefined;
   const deadline = Date.now() + WAIT_MS;
   while (!settled(message)) {
-    if (deadline - Date.now() <= POLL_MS) return { message, stillQueued: failure === undefined, failure };
+    if (deadline - Date.now() < POLL_MS + MIN_POLL_MS) return { message, stillQueued: failure === undefined, failure };
     await sleep(POLL_MS);
     try {
       const timeoutMs = deadline - Date.now();
@@ -182,6 +184,8 @@ async function waitForDelivery(sent: Message, key: string): Promise<Waited> {
       message = polled;
       failure = undefined;
     } catch (error) {
+      // A poll's time limit is the time left: running out is the wait ending, not a failure.
+      if (error instanceof CheslyNetworkError && error.timedOut) return { message, stillQueued: true, failure: undefined };
       failure = pollFailure(error);
       const passing = isTransient(error) || (error instanceof CheslyApiError && error.status === 429);
       if (!passing) return { message, stillQueued: false, failure };

@@ -390,6 +390,26 @@ describe('chesly send', () => {
     expect(terminal.stderr).toMatch(/^The message was sent, but following its delivery failed/);
   });
 
+  it('a_poll_cut_off_by_the_deadline_is_still_queued', async () => {
+    // Each poll gets only the time left: one that is still out when the 30 s run out was cut off by
+    // the wait itself, not a failure to follow the delivery.
+    vi.useFakeTimers();
+    const id = sent('queued').id;
+    const start = Date.now();
+    serve({
+      [SEND_PATH]: () => json(201, sent('queued')),
+      [`/v1/messages/${id}`]: () =>
+        new Promise<Response>((_, reject) =>
+          setTimeout(() => reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), start + 30_000 - Date.now()),
+        ),
+    });
+
+    const terminal = captureIo(true);
+    expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], terminal.io)).toBe(0);
+    expect(terminal.stdout).toBe('Sent to chat_7Hq2mR9xLp4vT1sK8nWz · queued\n');
+    expect(terminal.stderr).toBe('Still queued after 30 s.\n');
+  });
+
   it('wait_gives_up_after_30_s_and_says_still_queued', async () => {
     vi.useFakeTimers();
     const id = sent('queued').id;

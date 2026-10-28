@@ -110,10 +110,14 @@ export class CheslyApiError extends Error {
 
 /** The request got no HTTP answer: DNS, a refused connection, a dropped connection or a timeout. */
 export class CheslyNetworkError extends Error {
+  /** No answer came within the request's time limit. */
+  readonly timedOut: boolean;
+
   constructor(url: string, cause: unknown, timeoutMs = TIMEOUT_MS) {
     // No `cause` attached: fetch's own errors can quote header values, the key among them.
     super(`Couldn't reach ${new URL(url).origin}: ${networkReason(cause, timeoutMs)}`);
     this.name = 'CheslyNetworkError';
+    this.timedOut = isTimeout(rootCause(cause));
   }
 }
 
@@ -406,13 +410,8 @@ function nonEmpty(value: unknown): string | undefined {
  * the system call. Anything else, such as fetch's TypeError about a header, is never repeated.
  */
 function networkReason(error: unknown, timeoutMs: number): string {
-  let current = error;
-  for (let depth = 0; depth < 5 && current instanceof Error && current.cause !== undefined; depth++) {
-    current = current.cause;
-  }
-  if (current instanceof Error && (current.name === 'TimeoutError' || current.name === 'AbortError')) {
-    return `no answer within ${timeoutMs / 1000} s`;
-  }
+  const current = rootCause(error);
+  if (isTimeout(current)) return `no answer within ${timeoutMs / 1000} s`;
   // Each address tried (localhost is ::1 and 127.0.0.1), when the error naming them all says nothing.
   if (current instanceof AggregateError) {
     const tried = current.errors.filter(isSystemError).map((attempt) => attempt.message);
@@ -420,6 +419,20 @@ function networkReason(error: unknown, timeoutMs: number): string {
   }
   if (isSystemError(current)) return current.message;
   return 'the request failed before it reached the API';
+}
+
+/** The error at the end of `error`'s cause chain (fetch wraps the real one as its cause). */
+function rootCause(error: unknown): unknown {
+  let current = error;
+  for (let depth = 0; depth < 5 && current instanceof Error && current.cause !== undefined; depth++) {
+    current = current.cause;
+  }
+  return current;
+}
+
+/** The request's time limit ran out (fetch aborts with a TimeoutError, or an AbortError). */
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 }
 
 /** An error with a system or TLS code and a message (ECONNREFUSED, ENOTFOUND, CERT_HAS_EXPIRED…). */
