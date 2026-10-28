@@ -62,11 +62,16 @@ The key goes to your OS keychain (macOS Keychain, Windows Credential Manager, or
 on Linux). Where there is none, it goes to `~/.config/chesly/credentials.json` with mode 0600.
 
 A keychain that refuses (`keychain_error`) or doesn't answer within 10 seconds (`keychain_timeout`:
-locked, or showing a dialog nobody answers) never leaves a command waiting: reading the key falls
-back to the credentials file when it holds one, `chesly login` stores the key in the file instead
-and succeeds (after up to 20 seconds when the keychain doesn't answer), and only a read with no key
-in the file fails with that code, as does `chesly logout`, which still removes the file and lists
-what it removed in `removed`.
+locked, or showing a dialog nobody answers) never leaves a command waiting:
+- reading the key falls back to the credentials file when it holds one; only a read with no key in
+  the file fails with that code;
+- plain `chesly login` and `chesly login --no-wait` stop with that code (exit 1), unless a key in the
+  credentials file still works: the keychain may hold a working key, and another sign-in would add
+  a key toward the 25;
+- `chesly login --key` and `chesly login --force` store the key in the credentials file instead and
+  succeed (after up to 20 seconds when the keychain doesn't answer), as does `chesly login --wait`;
+- `chesly logout` fails with that code too, but still removes the file and lists what it removed in
+  `removed`.
 
 `--key -` reads the key from stdin. Never put a key itself on the command line: it would show in the
 process list and your shell history. For CI and servers, set `CHESLY_API_KEY` instead. It wins over

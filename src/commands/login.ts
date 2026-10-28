@@ -69,6 +69,10 @@ background and relay the first line of stderr.
 
 The key goes to the OS keychain, or to ~/.config/chesly/credentials.json
 (mode 0600) where there is no keychain. CHESLY_API_KEY, when set, wins over it.
+A keychain that refuses or doesn't answer stops plain login and --no-wait
+with keychain_error or keychain_timeout (it may hold a working key), unless a
+key in the credentials file works; --key and --force store the key in the
+credentials file instead, as --wait does.
 
 Pass a key through stdin (--key -), never as an argument: an argument shows
 in the process list and the shell history. In CI, set CHESLY_API_KEY instead.

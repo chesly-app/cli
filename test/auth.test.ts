@@ -337,6 +337,15 @@ describe('chesly login', () => {
     expect(cap.stderr).toContain('"id":"key_other"');
   });
 
+  it('login_help_says_what_a_failing_keychain_does', async () => {
+    const help = captureIo();
+    expect(await run(['login', '--help'], help.io)).toBe(0);
+    const text = help.stdout.replace(/\s+/g, ' ');
+    expect(text).toContain('keychain_error');
+    expect(text).toContain('keychain_timeout');
+    expect(text).toMatch(/--key and --force store the key in the credentials file instead/);
+  });
+
   it('login_with_a_rejected_stored_key_signs_in_again', async () => {
     vi.useFakeTimers();
     keychain.value = keyFor('revoked');
