@@ -35,6 +35,13 @@ JSON mode (piped, or `--json`) the link and the code are one JSON line on stderr
 {"verification_uri_complete":"https://web.chesly.app/cli?code=ABCD-EFGH","user_code":"ABCD-EFGH","expires_in":600}
 ```
 
+Once you approve, stdout holds the result: where the key went and its details, never the key itself
+(`key` is `null` if they didn't load):
+
+```json
+{"status":"signed_in","stored_in":"keychain","key":{"id":"…","name":"Chesly CLI on my-laptop","scope":"full","api_version":"2026-11-01"}}
+```
+
 The key goes to your OS keychain (macOS Keychain, Windows Credential Manager, or the Secret Service
 on Linux). Where there is none, it goes to `~/.config/chesly/credentials.json` with mode 0600.
 
@@ -260,8 +267,10 @@ included, on every network but email (add `--network email` for email threads):
   problem details built for it, with the code `http_400`, `http_404`, `http_413`, `http_429`,
   `http_500`, `http_502`, `http_503` or `http_504`, or `http_error` for any other status (the status
   is in `status`). Every code has its entry at https://agents.chesly.app/docs/errors.
-- **Notices** (a reconnecting `watch`, an expired resume point) go to stderr too, as one JSON line
-  each in JSON mode: `{"warning":"<code>","message":"..."}`.
+- **Notices** (a reconnecting `watch`, an expired resume point, a `CHESLY_API_KEY` that wins over
+  the key `login` stored) go to stderr too, as one JSON line each in JSON mode:
+  `{"warning":"<code>","message":"..."}`. Paging hints are for terminals only: JSON has
+  `next_cursor`.
 - **Other people's text** (names, messages) never reaches the terminal raw: tables drop escape
   sequences and other control characters, and JSON escapes them, so the parsed text is exact.
 - **Keys** are checked before they are sent, stored or shown: `ck_live_` and 48 letters, digits,

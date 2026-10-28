@@ -265,6 +265,21 @@ describe('read commands', () => {
     }
   });
 
+  it('json_mode_never_writes_plain_text_to_stderr', async () => {
+    // Paging hints and other notes are for people: JSON mode has next_cursor and truncated instead.
+    serve({
+      '/v1/chats': () => json(200, { chats: [MOM], next_cursor: 'cur_next' }),
+      [`/v1/chats/${MOM.id}/messages`]: () => json(200, MESSAGES),
+      '/v1/catch_up': () => json(200, { chats: [{ chat: MOM, messages: MESSAGES.messages }], truncated: true }),
+    });
+    for (const args of [['chats'], ['read', MOM.id], ['catchup']]) {
+      const cap = captureIo();
+      expect(await run(args, cap.io), args.join(' ')).toBe(0);
+      expect(cap.stderr, args.join(' ')).toBe('');
+      expect(JSON.parse(cap.stdout), args.join(' ')).toBeTypeOf('object');
+    }
+  });
+
   it('every_read_command_needs_a_key', async () => {
     const calls = mockFetch(() => json(200, {}));
     vi.stubEnv('CHESLY_API_KEY', '');

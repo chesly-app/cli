@@ -36,6 +36,9 @@ const SESSION = {
   interval: 3,
 };
 
+/** What `chesly login` prints in JSON mode once the key is stored: never the key, only its details. */
+const SIGNED_IN = { status: 'signed_in', stored_in: 'keychain', key: ME.key };
+
 let env: ReturnType<typeof isolateEnv>;
 
 beforeEach(() => {
@@ -62,7 +65,7 @@ describe('chesly login', () => {
     expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
     expect(storedWhenChecked).toBeNull();
     expect(keychain.value).toBe(KEY);
-    expect(JSON.parse(cap.stdout)).toEqual(ME);
+    expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
   });
 
   it('login_with_a_rejected_key_stores_nothing', async () => {
@@ -153,7 +156,7 @@ describe('chesly login', () => {
     expect(cap.stderr).toContain('https://web.chesly.app/cli?code=BCDF-GHJK');
     expect(cap.stderr + cap.stdout).not.toContain('dev_secret_value');
     expect(cap.stderr + cap.stdout).not.toContain(KEY);
-    expect(JSON.parse(cap.stdout)).toEqual(ME);
+    expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
     expect(spawn).not.toHaveBeenCalled();
   });
 
@@ -250,7 +253,7 @@ describe('chesly login', () => {
       expect(cap.stderr.split('\n').filter(Boolean).map((line) => JSON.parse(line))).toEqual([
         { verification_uri_complete: SESSION.verification_uri_complete, user_code: 'BCDF-GHJK', expires_in: 600 },
       ]);
-      expect(JSON.parse(cap.stdout)).toEqual(ME);
+      expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
     }
 
     // A terminal still gets the instructions as text.
@@ -390,14 +393,38 @@ describe('chesly login', () => {
       if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
       return problem(503, 'unavailable');
     });
-    const cap = captureIo();
 
-    const exit = run(['login'], cap.io);
+    const piped = captureIo();
+    const exit = run(['login'], piped.io);
     await vi.runAllTimersAsync();
     expect(await exit).toBe(0);
-
     expect(keychain.value).toBe(KEY);
-    expect(cap.stderr).toMatch(/signed in/i);
+    // stdout still holds the result; every stderr line is JSON: the link, then the warning.
+    expect(JSON.parse(piped.stdout)).toEqual({ status: 'signed_in', stored_in: 'keychain', key: null });
+    const notices = piped.stderr.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    expect(notices[1]).toMatchObject({ warning: 'key_details_unavailable' });
+
+    keychain.value = null;
+    const terminal = captureIo(true);
+    const shown = run(['login'], terminal.io);
+    await vi.runAllTimersAsync();
+    expect(await shown).toBe(0);
+    expect(terminal.stdout).toMatch(/^Signed in, and saved the key in /);
+  });
+
+  it('json_mode_notices_are_json_lines_and_stdout_holds_the_result', async () => {
+    vi.stubEnv('CHESLY_API_KEY', keyFor('env'));
+    mockFetch(() => json(200, ME));
+    const cap = captureIo();
+
+    expect(await run(['login', '--key', KEY], cap.io)).toBe(0);
+
+    expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
+    expect(JSON.parse(cap.stderr)).toMatchObject({ warning: 'env_key_set' });
+
+    const terminal = captureIo(true);
+    expect(await run(['login', '--key', KEY], terminal.io)).toBe(0);
+    expect(terminal.stderr).toMatch(/^Note: CHESLY_API_KEY is set/);
   });
 
   it('a_me_answer_without_the_key_details_is_a_problem_not_undefined', async () => {

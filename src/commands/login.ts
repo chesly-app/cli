@@ -91,9 +91,8 @@ async function loginInBrowser(out: Output): Promise<void> {
     me = await apiRequest<unknown>('/v1/me', { key });
   } catch (error) {
     if (!checkCouldNotRun(error)) throw error;
-    const store = await storeKey(key);
-    out.note(`Signed in, and saved the key in ${describeSource(store)}. Its details didn't load: ${error.message}`);
-    noteEnvKey(out);
+    signedIn(out, await storeKey(key), null);
+    out.warn('key_details_unavailable', `The key's details didn't load (${error.message}). chesly whoami shows them.`);
     return;
   }
   const store = await storeKey(key);
@@ -208,19 +207,20 @@ function approvalLink(complete: unknown, page: unknown, userCode: string): strin
   throw badAnswer('The API sent no sign-in link. Run `chesly login` again.');
 }
 
-function signedIn(out: Output, store: KeyStore, me: Me): void {
-  out.result(
-    me,
-    () =>
-      `Signed in with the key "${oneLine(me.key?.name ?? '', 100)}" (${scopeLabel(me.key?.scope)}).\n` +
-      `Saved it in ${describeSource(store)}.`,
+/**
+ * The sign-in's result: where the key went and its details (`null` when they didn't load), never the
+ * key itself. JSON mode prints `{ "status": "signed_in", "stored_in", "key" }`.
+ */
+function signedIn(out: Output, store: KeyStore, me: Me | null): void {
+  out.result({ status: 'signed_in', stored_in: store, key: me?.key ?? null }, () =>
+    me === null
+      ? `Signed in, and saved the key in ${describeSource(store)}.`
+      : `Signed in with the key "${oneLine(me.key?.name ?? '', 100)}" (${scopeLabel(me.key?.scope)}).\n` +
+        `Saved it in ${describeSource(store)}.`,
   );
-  noteEnvKey(out);
-}
-
-function noteEnvKey(out: Output): void {
   if (process.env.CHESLY_API_KEY?.trim()) {
-    out.note('Note: CHESLY_API_KEY is set in your environment and wins over the stored key until you unset it.');
+    const message = 'CHESLY_API_KEY is set in your environment and wins over the stored key until you unset it.';
+    out.notice({ warning: 'env_key_set', message }, () => `Note: ${message}`);
   }
 }
 

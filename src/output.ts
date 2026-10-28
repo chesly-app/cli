@@ -62,8 +62,12 @@ export class Output {
     this.io.out(this.json ? `${toJson(data, 2)}\n` : withNewline(human()));
   }
 
+  /**
+   * A note for people in a terminal (a paging hint, progress). JSON mode leaves it out: what it says is
+   * in the result, or the command sends a JSON notice instead (`notice`, `warn`).
+   */
   note(text: string): void {
-    this.io.err(withNewline(text));
+    if (!this.json) this.io.err(withNewline(text));
   }
 
   /**
