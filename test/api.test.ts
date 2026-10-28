@@ -223,6 +223,9 @@ describe('output and exit codes', () => {
       [problemJson(503, down, { 'retry-after': '30' }), down, 5, 'Retry in 30 s.'],
       // `retry_after` in the body wins over the header.
       [problemJson(503, { ...down, retry_after: 12 }, { 'retry-after': '60' }), { ...down, retry_after: 12 }, 5, 'Retry in 12 s.'],
+      // A gateway's 502 and 504 are "retry later" too.
+      [problemJson(502, problemBody(502, 'http_502'), { 'retry-after': '9' }), problemBody(502, 'http_502'), 5, 'Retry in 9 s.'],
+      [problemJson(504, problemBody(504, 'http_504'), { 'retry-after': '4' }), problemBody(504, 'http_504'), 5, 'Retry in 4 s.'],
     ];
 
     for (const [answer, sent, exitCode, hint] of cases) {

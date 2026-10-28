@@ -293,7 +293,7 @@ function exitCodeFor(error: CheslyApiError): ExitCode {
 /** What to do next, unless `message` already says when to retry (the API's details often do). */
 function hintFor(error: CheslyApiError, message: string): string | undefined {
   if (error.status === 401) return 'Run `chesly login` to sign in again, or check CHESLY_API_KEY.';
-  const retryable = error.status === 429 || error.status === 503;
+  const retryable = RETRY_LATER_STATUSES.has(error.status);
   if (retryable && error.retryAfter !== undefined && !/\bretry in\b/i.test(message)) return `Retry in ${error.retryAfter} s.`;
   return undefined;
 }
