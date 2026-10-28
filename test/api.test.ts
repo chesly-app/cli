@@ -83,6 +83,27 @@ describe('apiRequest', () => {
     expect(error).toMatchObject({ status: 400, code: 'slow_down' });
   });
 
+  it('an_error_that_is_a_sentence_is_never_a_code', async () => {
+    // The sign-in limiter answers { error: "<a sentence>" }: that became the code and the type's anchor.
+    mockFetch(() =>
+      json(429, { error: 'Too many sign-ins started. Please wait a minute.' }, { 'retry-after': '42', 'x-request-id': 'req_lim' }),
+    );
+
+    const error = await apiRequest('/v1/cli/sessions', { method: 'POST', body: {} }).catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ status: 429, code: 'http_429', retryAfter: 42 });
+    // The problem the CLI builds keeps the sentence as its detail, and says when to retry.
+    expect((error as CheslyApiError).problem).toEqual({
+      type: 'https://agents.chesly.app/docs/errors#http_429',
+      title: 'Too Many Requests',
+      status: 429,
+      detail: 'Too many sign-ins started. Please wait a minute.',
+      code: 'http_429',
+      request_id: 'req_lim',
+      retry_after: 42,
+    });
+  });
+
   it('refuses_to_send_a_malformed_key', async () => {
     const calls = mockFetch(() => json(200, ME));
 
@@ -255,6 +276,35 @@ describe('output and exit codes', () => {
     const cap = captureIo();
     expect(await run(['whoami'], cap.io)).toBe(1);
     expect(JSON.parse(cap.stderr)).toMatchObject({ code: 'http_500', status: 500 });
+
+    // A `code` that is a sentence doesn't make an answer a problem either.
+    mockFetch(() => json(502, { code: 'Upstream went away' }));
+    const sentence = captureIo();
+    expect(await run(['whoami'], sentence.io)).toBe(1);
+    expect(JSON.parse(sentence.stderr)).toMatchObject({ code: 'http_502', status: 502 });
+  });
+
+  it('a_built_problem_says_when_to_retry', async () => {
+    vi.stubEnv('CHESLY_API_KEY', KEY);
+    mockFetch(
+      () =>
+        new Response('<html>Service Unavailable</html>', {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'content-type': 'text/html', 'retry-after': '30' },
+        }),
+    );
+    const cap = captureIo();
+
+    await run(['whoami'], cap.io);
+
+    expect(JSON.parse(cap.stderr)).toEqual({
+      type: 'https://agents.chesly.app/docs/errors#http_503',
+      title: 'Service Unavailable',
+      status: 503,
+      code: 'http_503',
+      retry_after: 30,
+    });
   });
 
   it('usage_errors_exit_2', async () => {

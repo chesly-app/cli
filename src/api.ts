@@ -1,3 +1,4 @@
+import { STATUS_CODES } from 'node:http';
 import pkg from '../package.json' with { type: 'json' };
 import { AnnotatedError, CliError, EXIT, errorType } from './errors.js';
 
@@ -88,6 +89,7 @@ export class CheslyApiError extends Error {
       ...(fields.detail === undefined ? {} : { detail: fields.detail }),
       code: fields.code,
       ...(fields.requestId === undefined ? {} : { request_id: fields.requestId }),
+      ...(fields.retryAfter === undefined ? {} : { retry_after: fields.retryAfter }),
     };
   }
 }
@@ -303,14 +305,25 @@ function queryString(query: Readonly<Record<string, QueryValue>> = {}): string {
   return pairs.length === 0 ? '' : `?${pairs.join('&')}`;
 }
 
+/**
+ * The error for a refusal. Its code is the answer's `code`, else its OAuth-style `error` (the sign-in
+ * endpoints'), when either is token-shaped; else `http_<status>`. An `error` that is a sentence (a
+ * rate limiter's message) is the detail, never the code, so the code and its docs link stay stable.
+ */
 function errorFromResponse(response: Response, body: unknown): CheslyApiError {
   const fields = isRecord(body) ? body : {};
-  const code = nonEmpty(fields.code) ?? nonEmpty(fields.error) ?? `http_${response.status}`;
+  const code = token(fields.code) ?? token(fields.error) ?? `http_${response.status}`;
+  const sentence = token(fields.error) === undefined ? nonEmpty(fields.error) : undefined;
   return new CheslyApiError({
     status: response.status,
     code,
-    title: nonEmpty(fields.title) ?? nonEmpty(fields.error_description) ?? (response.statusText || `HTTP ${response.status}`),
-    detail: nonEmpty(fields.detail),
+    // HTTP/2 answers carry no reason phrase, so the standard one stands in.
+    title:
+      nonEmpty(fields.title) ??
+      nonEmpty(fields.error_description) ??
+      STATUS_CODES[response.status] ??
+      (response.statusText || `HTTP ${response.status}`),
+    detail: nonEmpty(fields.detail) ?? sentence ?? nonEmpty(fields.message),
     requestId: nonEmpty(fields.request_id) ?? response.headers.get('x-request-id') ?? undefined,
     retryAfter: retryAfterSeconds(fields.retry_after) ?? retryAfterSeconds(response.headers.get('retry-after')),
     // Problem details are printed exactly as received; anything else gets problem details built for it.
@@ -318,14 +331,19 @@ function errorFromResponse(response: Response, body: unknown): CheslyApiError {
   });
 }
 
-/** Problem details (RFC 9457): sent as application/problem+json, or JSON with a `type` or a `code`. */
+/** Problem details (RFC 9457): sent as application/problem+json, or JSON with a `type` or a token `code`. */
 function isProblem(response: Response, fields: Record<string, unknown>): boolean {
   if (Object.keys(fields).length === 0) return false;
   return (
     mediaTypeOf(response) === 'application/problem+json' ||
     typeof fields.type === 'string' ||
-    nonEmpty(fields.code) !== undefined
+    token(fields.code) !== undefined
   );
+}
+
+/** `value` when it is shaped like an error code (`rate_limited`, `slow_down`), else undefined. */
+function token(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-z][a-z0-9_]*$/.test(value) ? value : undefined;
 }
 
 /** The answer's media type, lowercased, without parameters. */
