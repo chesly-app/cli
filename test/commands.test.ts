@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
-import { CliError, EXIT, LOCAL_ERROR_CODES, LOCAL_WARNING_CODES } from '../src/errors.js';
+import { API_ERROR_CODES, CliError, EXIT, LOCAL_ERROR_CODES, LOCAL_WARNING_CODES, apiExitCode } from '../src/errors.js';
 import { formatWhen, reportError, terminalSafe } from '../src/output.js';
 import {
   BOOK_CLUB,
@@ -360,6 +360,16 @@ describe('in a terminal', () => {
         hint: /^Leave out --account/m,
       },
       {
+        args: ['read', 'chat_Em4iLtHr3adX9qP2vK7s'],
+        status: 409,
+        code: 'account_reconnect_required',
+        title: 'This account needs to be reconnected.',
+        detail:
+          "Chesly can't sign in to the email account this mail is on, so it can't fetch it. Reconnect the account in the Chesly app; GET /v1/accounts shows its status.",
+        message: 'This account needs to be reconnected.',
+        hint: /^Chesly can't sign in to that email account\. Reconnect it in the Chesly app; chesly accounts shows its status\.$/m,
+      },
+      {
         args: ['send', MOM.id, 'hi', '--reply-to', 'msg_x'],
         status: 400,
         code: 'invalid_reply_to',
@@ -576,6 +586,72 @@ describe('cli errors', () => {
     for (const { code, title } of LOCAL_ERROR_CODES) {
       expect(code, code).toMatch(/^[a-z][a-z0-9_]*$/);
       expect(title, code).toMatch(/^[A-Z].*\.$/);
+    }
+  });
+
+  it('every_api_code_has_a_title_and_an_exit_code', () => {
+    // README C2's full list as the API answers with it (services/v1/errors.ts, problem.ts), W2-f's
+    // transcription_failed included: each code, its status, and the exit code the CLI gives it.
+    const expected: Record<string, [status: number, exit: number]> = {
+      invalid_api_key: [401, 3],
+      forbidden: [403, 1],
+      not_found: [404, 4],
+      internal_error: [500, 1],
+      invalid_request: [400, 2],
+      insufficient_scope: [403, 1],
+      account_not_found: [404, 4],
+      ambiguous_account: [400, 1],
+      chat_not_found: [404, 4],
+      message_not_found: [404, 4],
+      media_not_found: [404, 4],
+      media_expired: [410, 1],
+      media_too_large: [400, 1],
+      media_unavailable: [503, 5],
+      invalid_cursor: [400, 1],
+      rate_limited: [429, 5],
+      network_unavailable: [503, 5],
+      search_unavailable: [503, 5],
+      feed_unavailable: [503, 5],
+      upstream_unavailable: [503, 5],
+      signing_key_missing: [403, 1],
+      idempotency_key_invalid: [400, 1],
+      idempotency_key_reused: [422, 1],
+      idempotency_in_progress: [409, 5],
+      message_request: [409, 1],
+      send_limit_reached: [429, 5],
+      text_too_long: [400, 1],
+      invalid_reply_to: [400, 1],
+      unsupported_chat: [400, 1],
+      events_expired: [410, 1],
+      too_many_streams: [429, 5],
+      webhook_not_found: [404, 4],
+      webhook_limit_reached: [400, 1],
+      invalid_webhook_url: [400, 1],
+      not_a_voice_note: [400, 1],
+      transcription_unavailable: [503, 5],
+      transcription_failed: [422, 1],
+      key_not_found: [404, 4],
+      api_plan_required: [402, 6],
+      trial_limit_reached: [402, 6],
+      spend_limit_reached: [402, 6],
+      calls_exhausted: [402, 6],
+      already_subscribed: [409, 1],
+      terms_changed: [409, 1],
+      email_send_failed: [502, 5],
+      account_reconnect_required: [409, 1],
+      api_paused: [503, 5],
+      payload_too_large: [413, 1],
+    };
+
+    expect(API_ERROR_CODES.map((entry) => entry.code).sort()).toEqual(Object.keys(expected).sort());
+    for (const { code, status, title } of API_ERROR_CODES) {
+      expect([status, apiExitCode(status, code)], code).toEqual(expected[code]);
+      expect(title, code).toMatch(/^[A-Za-z].*\.$/);
+    }
+    // Codes the CLI raises itself too keep the API's titles.
+    for (const { code, title } of LOCAL_ERROR_CODES) {
+      const api = API_ERROR_CODES.find((entry) => entry.code === code);
+      if (api !== undefined) expect(title, code).toBe(api.title);
     }
   });
 

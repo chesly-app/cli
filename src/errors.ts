@@ -64,6 +64,80 @@ export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> =
 ];
 
 /**
+ * Every code the API answers with (README C2, services/v1/errors.ts and routes/v1/problem.ts), with
+ * its status and the API's own title. The CLI prints these problems as they come; `apiExitCode`
+ * gives each its exit code, and `npm run export-errors` writes both for the docs' errors page.
+ */
+export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; title: string }> = [
+  { code: 'invalid_api_key', status: 401, title: 'The API key is missing or not valid.' },
+  { code: 'forbidden', status: 403, title: 'This request is not allowed.' },
+  { code: 'not_found', status: 404, title: 'Not found.' },
+  { code: 'internal_error', status: 500, title: 'Something went wrong on our side.' },
+  { code: 'invalid_request', status: 400, title: 'The request is not valid.' },
+  { code: 'insufficient_scope', status: 403, title: 'This API key does not allow this request.' },
+  { code: 'account_not_found', status: 404, title: 'Account not found.' },
+  { code: 'ambiguous_account', status: 400, title: "This account's chats can't be told apart yet." },
+  { code: 'chat_not_found', status: 404, title: 'Chat not found.' },
+  { code: 'message_not_found', status: 404, title: 'Message not found.' },
+  { code: 'media_not_found', status: 404, title: 'Media not found.' },
+  { code: 'media_expired', status: 410, title: 'The media has expired.' },
+  { code: 'media_too_large', status: 400, title: 'The media is too large.' },
+  { code: 'media_unavailable', status: 503, title: 'The media is temporarily unavailable.' },
+  { code: 'invalid_cursor', status: 400, title: 'The cursor is not valid.' },
+  { code: 'rate_limited', status: 429, title: 'Too many requests.' },
+  { code: 'network_unavailable', status: 503, title: 'This network is temporarily unavailable.' },
+  { code: 'search_unavailable', status: 503, title: 'Search is temporarily unavailable.' },
+  { code: 'feed_unavailable', status: 503, title: 'The feed is temporarily unavailable.' },
+  { code: 'upstream_unavailable', status: 503, title: 'Your messages are temporarily unavailable.' },
+  { code: 'signing_key_missing', status: 403, title: 'The account signing key is missing.' },
+  { code: 'idempotency_key_invalid', status: 400, title: 'The Idempotency-Key header is not valid.' },
+  { code: 'idempotency_key_reused', status: 422, title: 'This Idempotency-Key was used for a different request.' },
+  { code: 'idempotency_in_progress', status: 409, title: 'A request with this Idempotency-Key is still running.' },
+  { code: 'message_request', status: 409, title: 'This chat is a message request.' },
+  { code: 'send_limit_reached', status: 429, title: "This account's send limit is reached." },
+  { code: 'text_too_long', status: 400, title: 'The text is too long for this network.' },
+  { code: 'invalid_reply_to', status: 400, title: 'reply_to must be a message in this chat.' },
+  { code: 'unsupported_chat', status: 400, title: "Chesly can't send to this chat." },
+  { code: 'events_expired', status: 410, title: 'These events are no longer kept.' },
+  { code: 'too_many_streams', status: 429, title: 'Too many open event streams.' },
+  { code: 'webhook_not_found', status: 404, title: 'Webhook not found.' },
+  { code: 'webhook_limit_reached', status: 400, title: 'This account has the most webhooks allowed.' },
+  { code: 'invalid_webhook_url', status: 400, title: "This webhook URL can't be used." },
+  { code: 'not_a_voice_note', status: 400, title: 'This message is not a voice note.' },
+  { code: 'transcription_unavailable', status: 503, title: 'Transcription is temporarily unavailable.' },
+  { code: 'transcription_failed', status: 422, title: 'This voice message could not be transcribed.' },
+  { code: 'key_not_found', status: 404, title: 'API key not found.' },
+  { code: 'api_plan_required', status: 402, title: 'An API plan is required.' },
+  { code: 'trial_limit_reached', status: 402, title: "The trial's included usage is used up." },
+  { code: 'spend_limit_reached', status: 402, title: 'The monthly spend limit is reached.' },
+  { code: 'calls_exhausted', status: 402, title: 'The included calls and call packs are used up.' },
+  { code: 'already_subscribed', status: 409, title: 'You already have an API plan.' },
+  { code: 'terms_changed', status: 409, title: 'The API Terms changed.' },
+  { code: 'email_send_failed', status: 502, title: 'The email provider refused the message.' },
+  { code: 'account_reconnect_required', status: 409, title: 'This account needs to be reconnected.' },
+  { code: 'api_paused', status: 503, title: 'The Chesly API is paused.' },
+  { code: 'payload_too_large', status: 413, title: 'The request body is too large.' },
+];
+
+/** Answers that mean "not final, come back to it", with retry_after or not: limits, and gateways or the API briefly away. */
+export const RETRY_LATER_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
+
+/**
+ * The exit code for an API answer. A 400 invalid_request is a usage error, as one the CLI finds is.
+ * A 429, a 502-504 and a first attempt still running (409 idempotency_in_progress) are "come back to
+ * it" (5). Anything not named here is 1.
+ */
+export function apiExitCode(status: number, code: string): ExitCode {
+  if (status === 400 && code === 'invalid_request') return EXIT.USAGE;
+  if (status === 401) return EXIT.NOT_SIGNED_IN;
+  if (status === 402) return EXIT.PAYMENT_REQUIRED;
+  if (status === 404) return EXIT.NOT_FOUND;
+  if (RETRY_LATER_STATUSES.has(status)) return EXIT.RETRY_LATER;
+  if (status === 409 && code === 'idempotency_in_progress') return EXIT.RETRY_LATER;
+  return EXIT.ERROR;
+}
+
+/**
  * Every warning the CLI prints: `{"warning": "<code>", "message", ...}` lines on stderr in JSON mode,
  * which never change the exit code. Exported with the errors, for the docs.
  */

@@ -381,7 +381,7 @@ npm install
 npm test                              # vitest; mocked fetch and keychain, no network
 npm run typecheck
 npm run build                         # tsup -> dist/index.js and dist/errors.js
-npm run export-errors -- <dir>        # writes <dir>/cli-errors.json and cli-warnings.json for the docs
+npm run export-errors -- <dir>        # writes cli-errors.json, cli-warnings.json and cli-api-codes.json
 ```
 
 Dependencies are pinned to exact versions, and `.npmrc` sets `min-release-age=14`, so npm never

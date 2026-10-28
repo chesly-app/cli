@@ -1,6 +1,6 @@
 import { CommanderError } from 'commander';
 import { CheslyApiError, CheslyNetworkError } from './api.js';
-import { AnnotatedError, CliError, EXIT, errorType, type ExitCode } from './errors.js';
+import { AnnotatedError, CliError, EXIT, RETRY_LATER_STATUSES, apiExitCode, errorType, type ExitCode } from './errors.js';
 
 /** Where a run writes, and the input it may read. `isTTY` says whether stdout is a terminal. */
 export interface Io {
@@ -230,6 +230,9 @@ const CLI_WORDING: Readonly<Record<string, { message?: string; hint: string }>> 
   ambiguous_account: {
     hint: "Leave out --account: you have more than one account on this network, and their chats can't be told apart yet.",
   },
+  account_reconnect_required: {
+    hint: "Chesly can't sign in to that email account. Reconnect it in the Chesly app; chesly accounts shows its status.",
+  },
   invalid_reply_to: {
     message: '--reply-to must be a message in this chat.',
     hint: 'chesly read <chat> shows its messages with their IDs.',
@@ -252,7 +255,7 @@ function describeFailure(error: unknown): Failure {
     const message = wording === undefined ? error.message : (wording.message ?? error.title);
     return {
       message,
-      exitCode: exitCodeFor(error),
+      exitCode: apiExitCode(error.status, error.code),
       problem: error.problem,
       requestId: error.requestId,
       hint: [wording?.hint, hintFor(error, message)].filter(Boolean).join('\n') || undefined,
@@ -271,23 +274,6 @@ function describeFailure(error: unknown): Failure {
   }
   const message = `Unexpected error: ${error instanceof Error ? error.message : String(error)}`;
   return { message, exitCode: EXIT.ERROR, problem: cliProblem('internal_error', message) };
-}
-
-/** Answers that mean "temporary, retry later", with retry_after or not: limits, and gateways or the API briefly away. */
-const RETRY_LATER_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
-
-/**
- * The exit code for an API error. A 400 invalid_request is a usage error, as one the CLI finds is.
- * A 429, a 502-504 and a first attempt still running (409 idempotency_in_progress) are "retry later".
- */
-function exitCodeFor(error: CheslyApiError): ExitCode {
-  if (error.status === 400 && error.code === 'invalid_request') return EXIT.USAGE;
-  if (error.status === 401) return EXIT.NOT_SIGNED_IN;
-  if (error.status === 402) return EXIT.PAYMENT_REQUIRED;
-  if (error.status === 404) return EXIT.NOT_FOUND;
-  if (RETRY_LATER_STATUSES.has(error.status)) return EXIT.RETRY_LATER;
-  if (error.status === 409 && error.code === 'idempotency_in_progress') return EXIT.RETRY_LATER;
-  return EXIT.ERROR;
 }
 
 /** What to do next, unless `message` already says when to retry (the API's details often do). */
