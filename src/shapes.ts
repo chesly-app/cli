@@ -153,13 +153,10 @@ export function isMessage(value: unknown): value is Message {
   return isRecord(value) && typeof value.id === 'string' && value.id !== '' && typeof value.chat_id === 'string';
 }
 
-/** `GET /v1/chats/:chat_id/messages`: newest first, and `next_cursor` while there are older ones. */
-export interface MessagePage {
-  messages: Message[];
-  next_cursor: string | null;
-}
-
-/** A page of messages, or search's answer: `{ messages: [...] }`. */
+/**
+ * `GET /v1/chats/:chat_id/messages` (newest first, and `next_cursor` while there are older ones), or
+ * search's answer: `{ messages: [...] }`.
+ */
 export function isMessageList(value: unknown): value is { messages: Message[]; next_cursor?: string | null } {
   return isRecord(value) && Array.isArray(value.messages) && value.messages.every(isMessage);
 }
@@ -217,7 +214,7 @@ export interface Webhook {
   updated_at: string;
 }
 
-export function isWebhook(value: unknown): value is Webhook {
+function isWebhook(value: unknown): value is Webhook {
   return isRecord(value) && typeof value.id === 'string' && typeof value.url === 'string';
 }
 

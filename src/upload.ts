@@ -6,7 +6,7 @@ import { CliError, EXIT } from './errors.js';
 import { isMediaUpload, type MediaUpload } from './shapes.js';
 
 /** The most one attachment can weigh: 50 MB (52,428,800 bytes), as the API takes. */
-export const MAX_UPLOAD_BYTES = 52_428_800;
+const MAX_UPLOAD_BYTES = 52_428_800;
 
 /**
  * The type the API files an attachment by: `image/*` is sent as a photo, `video/*` as a video,
