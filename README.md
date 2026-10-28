@@ -27,9 +27,9 @@ chesly login                              # approve the code on web.chesly.app
 chesly login --key - < chesly-key.txt     # or store a key you already have (checked first)
 ```
 
-`chesly login` prints a link and a code, opens your browser when it runs in a terminal, and waits
-until you approve the code. It never reads input, so an agent can run it and show you the link. In
-JSON mode (piped, or `--json`) the link and the code are one JSON line on stderr:
+`chesly login` prints a link and a code, opens your browser wherever one can show (not over SSH,
+not in CI, and not with `--no-browser`), and waits until you approve the code. It never reads
+input. In JSON mode (piped, or `--json`) the link and the code are one JSON line on stderr:
 
 ```json
 {"verification_uri_complete":"https://web.chesly.app/cli?code=ABCD-EFGH","user_code":"ABCD-EFGH","expires_in":600}
@@ -41,6 +41,22 @@ Once you approve, stdout holds the result: where the key went and its details, n
 ```json
 {"status":"signed_in","stored_in":"keychain","key":{"id":"…","name":"Chesly CLI on my-laptop","scope":"full","api_version":"2026-11-01"}}
 ```
+
+### Signing in from an agent
+
+An agent whose tool shows a command's output only once it ends can't relay the link while
+`chesly login` waits. It signs in in two steps instead:
+
+```sh
+chesly login --no-wait     # prints the link and the code, and exits 0
+chesly login --wait        # once the person has the link: waits for the approval, stores the key
+```
+
+`--no-wait` prints `{"status":"pending","verification_uri_complete":"…","user_code":"…","expires_in":600}`
+on stdout (and opens the browser, as above). The sign-in waits in `~/.config/chesly/pending-login.json`
+(mode 0600) until `--wait` finishes it or the code expires, 10 minutes later. A `--wait` cut short
+(Ctrl+C, a tool's time limit) can run again. An agent whose tool streams output can instead start
+`chesly login` in the background and relay the first line of stderr.
 
 The key goes to your OS keychain (macOS Keychain, Windows Credential Manager, or the Secret Service
 on Linux). Where there is none, it goes to `~/.config/chesly/credentials.json` with mode 0600.
@@ -214,7 +230,7 @@ With `--json` it prints the API's `GET /v1/me` answer.
 
 | Command | What it does |
 |---|---|
-| `chesly login [--key <key>]` | Signs in through the browser, or stores a key after checking it with `GET /v1/me` |
+| `chesly login [--key <key>\|-] [--no-browser] [--no-wait\|--wait]` | Signs in through the browser (in two steps with `--no-wait`, then `--wait`), or stores a key after checking it with `GET /v1/me` |
 | `chesly logout` | Removes the stored key from this computer |
 | `chesly whoami` | Shows the key in use: name, scope, API version, limits and usage (`GET /v1/me`) |
 | `chesly key [--reveal]` | Shows the key in use, masked (`ck_live_AbCd…WxYz`); `--reveal` prints the whole key and nothing else |

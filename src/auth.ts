@@ -10,9 +10,56 @@ export type KeySource = 'env' | 'keychain' | 'file';
 /** Where `chesly login` keeps a key. */
 export type KeyStore = Exclude<KeySource, 'env'>;
 
+/** The CLI's own files: the key where there is no keychain, and a pending sign-in. */
+function configDir(): string {
+  return join(homedir(), '.config', 'chesly');
+}
+
 /** The fallback where there is no OS keychain. */
 function credentialsPath(): string {
-  return join(homedir(), '.config', 'chesly', 'credentials.json');
+  return join(configDir(), 'credentials.json');
+}
+
+function pendingLoginPath(): string {
+  return join(configDir(), 'pending-login.json');
+}
+
+/**
+ * A sign-in `chesly login --no-wait` started, which `chesly login --wait` finishes: the device code to
+ * poll with, until `expiresAt` (ms since the epoch). It lets whoever reads it collect the key once the
+ * code is approved, so it is kept like the key: in a file only its owner can read.
+ */
+export interface PendingLogin {
+  deviceCode: string;
+  userCode: string;
+  link: string;
+  interval: number;
+  expiresAt: number;
+}
+
+export async function savePendingLogin(login: PendingLogin): Promise<void> {
+  try {
+    await writePrivateFile(pendingLoginPath(), `${JSON.stringify(login)}\n`);
+  } catch (error) {
+    throw new CliError('credentials_file_error', `Couldn't save the sign-in to ${pendingLoginPath()}: ${reasonOf(error)}`);
+  }
+}
+
+/** The pending sign-in, or null when there is none (or the file isn't one). */
+export async function readPendingLogin(): Promise<PendingLogin | null> {
+  try {
+    const value = JSON.parse(await readFile(pendingLoginPath(), 'utf8')) as Partial<Record<keyof PendingLogin, unknown>>;
+    const { deviceCode, userCode, link, interval, expiresAt } = value;
+    if (typeof deviceCode !== 'string' || typeof userCode !== 'string' || typeof link !== 'string') return null;
+    if (typeof interval !== 'number' || typeof expiresAt !== 'number') return null;
+    return { deviceCode, userCode, link, interval, expiresAt };
+  } catch {
+    return null;
+  }
+}
+
+export async function deletePendingLogin(): Promise<void> {
+  await rm(pendingLoginPath(), { force: true }).catch(() => {});
 }
 
 /** The key to use: `CHESLY_API_KEY`, then the OS keychain, then the credentials file. */
@@ -190,13 +237,16 @@ async function readCredentialsFile(): Promise<string | null> {
   }
 }
 
-/** Written to a temp file with mode 0600, then renamed over, so the key is never readable by others. */
 async function writeCredentialsFile(key: string): Promise<void> {
-  const file = credentialsPath();
+  await writePrivateFile(credentialsPath(), `${JSON.stringify({ api_key: key }, null, 2)}\n`);
+}
+
+/** Written to a temp file with mode 0600, then renamed over, so the content is never readable by others. */
+async function writePrivateFile(file: string, content: string): Promise<void> {
   await mkdir(dirname(file), { recursive: true, mode: 0o700 });
   const temp = `${file}.${process.pid}.tmp`;
   await rm(temp, { force: true });
-  await writeFile(temp, `${JSON.stringify({ api_key: key }, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  await writeFile(temp, content, { mode: 0o600, flag: 'wx' });
   await rename(temp, file);
 }
 

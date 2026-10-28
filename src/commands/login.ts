@@ -2,19 +2,26 @@ import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import type { Command } from 'commander';
 import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey, isLoopbackHost, sleep } from '../api.js';
-import { describeSource, storeKey, type KeyStore } from '../auth.js';
+import {
+  deletePendingLogin,
+  describeSource,
+  readPendingLogin,
+  savePendingLogin,
+  storeKey,
+  type KeyStore,
+  type PendingLogin,
+} from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
 import { Output, oneLine, terminalSafe, type Io } from '../output.js';
 import { scopeLabel } from '../render.js';
 import { isMe, type Me } from '../shapes.js';
 
-/** `POST /v1/cli/sessions` (RFC 8628 §3.2), checked: `link` always carries the code. */
-interface CliSession {
-  deviceCode: string;
-  userCode: string;
-  link: string;
-  expiresIn: number;
-  interval: number;
+interface LoginOptions {
+  key?: string;
+  /** False with --no-browser. */
+  browser?: boolean;
+  /** True with --wait, false with --no-wait. */
+  wait?: boolean;
 }
 
 export function registerLogin(program: Command, io: Io): void {
@@ -22,14 +29,27 @@ export function registerLogin(program: Command, io: Io): void {
     .command('login')
     .description('Sign in: approve this computer on web.chesly.app, or store a key with --key')
     .option('--key <key>', 'check an API key with the API, then store it (no browser); - reads it from stdin')
+    .option('--no-browser', 'print the link only, without opening a browser')
+    .option('--wait', 'finish the sign-in --no-wait started: wait for the approval, then store the key')
+    .option('--no-wait', 'start a sign-in, print its link and code, and exit at once')
     .addHelpText(
       'after',
       `
-Without --key, chesly login prints a link and a code, opens the browser when
-stdout is a terminal, and waits until you approve the code on web.chesly.app.
-It never reads input, so an agent can run it and show the link to a person.
-In JSON mode the link and the code are one line on stderr:
+Without --key, chesly login prints a link and a code, opens your browser
+(wherever there is one to show: not over SSH, not in CI, not with
+--no-browser), and waits until you approve the code on web.chesly.app.
+It never reads input. In JSON mode the link and the code are one line on
+stderr, and the result is one object on stdout:
   {"verification_uri_complete":"…","user_code":"ABCD-EFGH","expires_in":600}
+  {"status":"signed_in","stored_in":"keychain","key":{…}}
+
+Agents: a tool that shows a command's output only once it ends can sign in in
+two steps. chesly login --no-wait prints the link and the code and exits:
+  {"status":"pending","verification_uri_complete":"…","user_code":"…","expires_in":600}
+Show them to your person, then run chesly login --wait, which waits for the
+approval and stores the key. A --wait cut short can run again until the code
+expires. A tool that streams output can instead run chesly login in the
+background and relay the first line of stderr.
 
 The key goes to the OS keychain, or to ~/.config/chesly/credentials.json
 (mode 0600) where there is no keychain. CHESLY_API_KEY, when set, wins over it.
@@ -39,12 +59,33 @@ in the process list and the shell history. In CI, set CHESLY_API_KEY instead.
 
 Examples:
   chesly login
+  chesly login --no-wait        then, once you have shown the link:  chesly login --wait
   chesly login --key - < chesly-key.txt`,
     )
-    .action(async (options: { key?: string }, command: Command) => {
+    .action(async (options: LoginOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
-      if (options.key !== undefined) await loginWithKey(out, (await keyArgument(options.key, io)).trim());
-      else await loginInBrowser(out);
+      if (options.key !== undefined) {
+        if (options.wait !== undefined) {
+          throw new CliError('usage_error', '--key stores a key at once: leave out --wait and --no-wait.', EXIT.USAGE);
+        }
+        await loginWithKey(out, (await keyArgument(options.key, io)).trim());
+        return;
+      }
+      if (options.wait === true) {
+        await finishPendingSignIn(out);
+        return;
+      }
+      const signIn = await startSignIn();
+      if (options.wait === false) {
+        await savePendingLogin(signIn);
+        const opened = options.browser !== false && openBrowser(signIn.link);
+        showPending(out, signIn, opened);
+        return;
+      }
+      showLink(out, signIn);
+      const opened = options.browser !== false && openBrowser(signIn.link);
+      out.note(`${opened ? 'Opened your browser. ' : ''}Waiting for approval… (Ctrl+C to cancel)`);
+      await keepKey(out, await pollForKey(signIn));
     });
 }
 
@@ -79,13 +120,32 @@ async function loginWithKey(out: Output, key: string): Promise<void> {
 }
 
 /**
+ * Finishes the sign-in `chesly login --no-wait` started. Once polling ends, approved or not, the code
+ * is spent and its file goes; only a --wait cut short (Ctrl+C, an agent's time limit) leaves it for
+ * the next one.
+ */
+async function finishPendingSignIn(out: Output): Promise<void> {
+  const pending = await readPendingLogin();
+  if (pending === null) {
+    throw new CliError('login_not_started', 'No sign-in is waiting to finish. Start one with `chesly login --no-wait`.');
+  }
+  out.note(`Waiting for approval of the code ${terminalSafe(pending.userCode)}… (Ctrl+C to stop; --wait picks it up again)`);
+  let key: string;
+  try {
+    key = await pollForKey(pending);
+  } finally {
+    await deletePendingLogin();
+  }
+  await keepKey(out, key);
+}
+
+/**
  * The new key is checked with GET /v1/me before it is stored, as with --key, so a rejected key fails
  * the sign-in. Only when the check can't run (a network blip, a 5xx, a 429) is the key stored
  * unchecked: the server hands each key out once, and dropping it would orphan it. For the same
  * reason, an answer that accepts the key but sends none of its details stores it, then fails.
  */
-async function loginInBrowser(out: Output): Promise<void> {
-  const key = await approveInBrowser(out);
+async function keepKey(out: Output, key: string): Promise<void> {
   let me: unknown;
   try {
     me = await apiRequest<unknown>('/v1/me', { key });
@@ -111,36 +171,60 @@ function checkCouldNotRun(error: unknown): error is CheslyNetworkError | CheslyA
 /** The longest wait between polls after failures (RFC 8628 §3.5 asks a client to slow down after one). */
 const MAX_BACKOFF_SECONDS = 30;
 
-/**
- * The device flow: show the link, then poll until the code is approved, denied or expired (RFC 8628
- * §3.4-3.5). A network error or a 5xx doubles the wait (up to 30 s), and no wait runs past the expiry.
- */
-async function approveInBrowser(out: Output): Promise<string> {
-  const session = checkSession(
-    await apiRequest<unknown>('/v1/cli/sessions', { method: 'POST', body: { client_name: hostname() } }),
-  );
-  // JSON mode: one line an agent can parse, to show the link and the code to its person.
-  out.notice(
-    { verification_uri_complete: session.link, user_code: session.userCode, expires_in: session.expiresIn },
-    () =>
-      `To sign in, open this link:\n\n  ${terminalSafe(session.link)}\n\n` +
-      `Approve it if the page shows the code ${terminalSafe(session.userCode)}.`,
-  );
-  const opened = out.io.isTTY && openBrowser(session.link);
-  if (!out.json) {
-    out.note(`${opened ? 'Opened your browser. ' : ''}Waiting for approval… (Ctrl+C to cancel)`);
-  }
+/** Starts a device-flow sign-in (RFC 8628 §3.2): `POST /v1/cli/sessions`, checked before anything is shown. */
+async function startSignIn(): Promise<PendingLogin> {
+  const answer = await apiRequest<unknown>('/v1/cli/sessions', { method: 'POST', body: { client_name: hostname() } });
+  return checkSession(answer);
+}
 
-  let interval = session.interval;
-  const expiresAt = Date.now() + session.expiresIn * 1000;
+/** Seconds until the code expires, for people and agents. */
+function expiresIn(signIn: PendingLogin): number {
+  return Math.max(0, Math.round((signIn.expiresAt - Date.now()) / 1000));
+}
+
+/** The link and the code, while chesly login waits. JSON mode: one line an agent can parse, on stderr. */
+function showLink(out: Output, signIn: PendingLogin): void {
+  out.notice(
+    { verification_uri_complete: signIn.link, user_code: signIn.userCode, expires_in: expiresIn(signIn) },
+    () =>
+      `To sign in, open this link:\n\n  ${terminalSafe(signIn.link)}\n\n` +
+      `Approve it if the page shows the code ${terminalSafe(signIn.userCode)}.`,
+  );
+}
+
+/** --no-wait's result: the link and the code, and what to run next. */
+function showPending(out: Output, signIn: PendingLogin, opened: boolean): void {
+  out.result(
+    {
+      status: 'pending',
+      verification_uri_complete: signIn.link,
+      user_code: signIn.userCode,
+      expires_in: expiresIn(signIn),
+    },
+    () =>
+      `To sign in, open this link:\n\n  ${terminalSafe(signIn.link)}\n\n` +
+      `Approve it if the page shows the code ${terminalSafe(signIn.userCode)}, then run chesly login --wait.`,
+  );
+  if (opened) out.note('Opened your browser.');
+}
+
+/**
+ * Polls until the code is approved, denied or expired (RFC 8628 §3.4-3.5), and returns the key. A
+ * network error or a 5xx doubles the wait (up to 30 s), and no wait runs past the expiry.
+ */
+async function pollForKey(signIn: PendingLogin): Promise<string> {
+  let interval = signIn.interval;
+  const { expiresAt } = signIn;
   for (;;) {
-    await sleep(Math.min(interval * 1000, Math.max(0, expiresAt - Date.now())));
+    const left = expiresAt - Date.now();
+    if (left <= 0) throw expired();
+    await sleep(Math.min(interval * 1000, left));
     if (Date.now() >= expiresAt) throw expired();
     let token: { api_key?: unknown } | undefined;
     try {
       token = await apiRequest<{ api_key?: unknown }>('/v1/cli/sessions/token', {
         method: 'POST',
-        body: { device_code: session.deviceCode },
+        body: { device_code: signIn.deviceCode },
       });
     } catch (error) {
       if (error instanceof CheslyApiError) {
@@ -180,8 +264,8 @@ function slowerAfterFailure(interval: number): number {
   return Math.max(interval, Math.min(interval * 2, MAX_BACKOFF_SECONDS));
 }
 
-/** The answer to `POST /v1/cli/sessions`, checked before anything is shown. */
-function checkSession(answer: unknown): CliSession {
+/** The answer to `POST /v1/cli/sessions`, checked: `link` always carries the code. */
+function checkSession(answer: unknown): PendingLogin {
   const fields = (typeof answer === 'object' && answer !== null ? answer : {}) as Record<string, unknown>;
   const { device_code: deviceCode, user_code: userCode } = fields;
   if (typeof deviceCode !== 'string' || deviceCode === '' || typeof userCode !== 'string' || userCode === '') {
@@ -191,7 +275,7 @@ function checkSession(answer: unknown): CliSession {
     deviceCode,
     userCode,
     link: approvalLink(fields.verification_uri_complete, fields.verification_uri, userCode),
-    expiresIn: positiveOr(fields.expires_in, 600),
+    expiresAt: Date.now() + positiveOr(fields.expires_in, 600) * 1000,
     interval: positiveOr(fields.interval, 5),
   };
 }
@@ -233,11 +317,12 @@ function expired(): CliError {
 }
 
 /**
- * Opens `url` in the default browser. Returns false where that can't work: over SSH, or on Linux and
- * the BSDs without a display, where xdg-open could start a text browser inside this terminal.
+ * Opens `url` in the default browser, whether or not stdout is a terminal: an agent's person sees it.
+ * Returns false where nobody would: over SSH, in CI, or on Linux and the BSDs without a display, where
+ * xdg-open could start a text browser inside this terminal.
  */
 function openBrowser(url: string): boolean {
-  if (!isWebUrl(url) || process.env.SSH_CONNECTION || process.env.SSH_TTY) return false;
+  if (!isWebUrl(url) || process.env.SSH_CONNECTION || process.env.SSH_TTY || inCi()) return false;
   let command: string;
   let args: string[];
   if (process.platform === 'darwin') {
@@ -256,6 +341,12 @@ function openBrowser(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** CI sets CI (to true, 1, or a name); a CI job has no person to approve anything. */
+function inCi(): boolean {
+  const ci = process.env.CI?.trim().toLowerCase();
+  return ci !== undefined && ci !== '' && ci !== 'false' && ci !== '0';
 }
 
 /** Only web pages: the link comes from the API, and CHESLY_API_URL may point anywhere. */

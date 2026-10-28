@@ -239,6 +239,7 @@ export function isolateEnv(): { home: string; cleanup: () => void } {
   vi.stubEnv('CHESLY_API_URL', 'https://api.test');
   vi.stubEnv('SSH_CONNECTION', '');
   vi.stubEnv('SSH_TTY', '');
+  vi.stubEnv('CI', '');
   return {
     home,
     cleanup: () => {
@@ -252,6 +253,11 @@ export function isolateEnv(): { home: string; cleanup: () => void } {
 
 export function credentialsFile(home: string): string {
   return join(home, '.config', 'chesly', 'credentials.json');
+}
+
+/** Where `chesly login --no-wait` keeps the sign-in that `chesly login --wait` finishes. */
+export function pendingLoginFile(home: string): string {
+  return join(home, '.config', 'chesly', 'pending-login.json');
 }
 
 export function writeCredentials(home: string, apiKey: string): void {

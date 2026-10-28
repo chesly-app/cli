@@ -53,6 +53,7 @@ export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> =
   { code: 'invalid_response', title: "The API's answer is not what the CLI expects." },
   { code: 'keychain_error', title: 'The OS keychain refused.' },
   { code: 'keychain_timeout', title: "The OS keychain didn't answer in time." },
+  { code: 'login_not_started', title: 'No sign-in is waiting to finish.' },
   { code: 'media_too_large', title: 'The media is too large.' },
   { code: 'network_error', title: "The CLI couldn't reach the API." },
   { code: 'not_signed_in', title: 'Not signed in.' },

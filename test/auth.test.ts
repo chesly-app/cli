@@ -17,6 +17,7 @@ import {
   credentialsFile,
   firstLine,
   isolateEnv,
+  pendingLoginFile,
   json,
   keyFor,
   keychain,
@@ -132,7 +133,7 @@ describe('chesly login', () => {
     });
     const cap = captureIo();
 
-    const exit = run(['login'], cap.io);
+    const exit = run(['login', '--no-browser'], cap.io);
     await vi.runAllTimersAsync();
     expect(await exit).toBe(0);
 
@@ -190,7 +191,8 @@ describe('chesly login', () => {
     expect(keychain.value).toBeNull();
   });
 
-  it('device_login_opens_the_browser_only_in_a_terminal', async () => {
+  it('device_login_opens_the_browser_wherever_there_is_a_display', async () => {
+    // An agent's commands are piped: the browser opens for its person all the same.
     vi.useFakeTimers();
     vi.stubEnv('DISPLAY', ':0'); // Linux and BSD only open a browser where there is a display.
     mockFetch((call) => {
@@ -198,14 +200,106 @@ describe('chesly login', () => {
       if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
       return json(200, ME);
     });
-    const cap = captureIo(true);
+    const login = async (args: string[], isTTY: boolean) => {
+      vi.mocked(spawn).mockClear();
+      keychain.value = null;
+      const exit = run(args, captureIo(isTTY).io);
+      await vi.runAllTimersAsync();
+      expect(await exit, args.join(' ')).toBe(0);
+      return vi.mocked(spawn).mock.calls;
+    };
 
-    const exit = run(['login'], cap.io);
+    for (const isTTY of [true, false]) {
+      const opened = await login(['login'], isTTY);
+      expect(opened).toHaveLength(1);
+      expect(opened[0]?.[1]).toContain(SESSION.verification_uri_complete);
+    }
+    expect(await login(['login', '--no-browser'], false)).toHaveLength(0);
+    // Never over SSH or in CI: nobody would see it there.
+    vi.stubEnv('SSH_CONNECTION', '10.0.0.2 51000 10.0.0.1 22');
+    expect(await login(['login'], false)).toHaveLength(0);
+    vi.stubEnv('SSH_CONNECTION', '');
+    vi.stubEnv('CI', 'true');
+    expect(await login(['login'], true)).toHaveLength(0);
+  });
+
+  it('login_no_wait_prints_the_link_and_keeps_the_sign_in_pending', async () => {
+    vi.useFakeTimers();
+    const calls = mockFetch(() => json(200, SESSION));
+
+    const piped = captureIo();
+    expect(await run(['login', '--no-wait', '--no-browser'], piped.io)).toBe(0);
+
+    // One JSON object on stdout, and nothing polled: the command is done.
+    expect(JSON.parse(piped.stdout)).toEqual({
+      status: 'pending',
+      verification_uri_complete: SESSION.verification_uri_complete,
+      user_code: 'BCDF-GHJK',
+      expires_in: 600,
+    });
+    expect(piped.stderr).toBe('');
+    expect(calls.map((call) => call.url)).toEqual(['https://api.test/v1/cli/sessions']);
+    expect(vi.getTimerCount()).toBe(0);
+    // The device code waits in a private file, never on screen.
+    const pending = pendingLoginFile(env.home);
+    expect(readFileSync(pending, 'utf8')).toContain('dev_secret_value');
+    if (process.platform !== 'win32') expect(statSync(pending).mode & 0o777).toBe(0o600);
+    expect(piped.stdout).not.toContain('dev_secret_value');
+
+    const terminal = captureIo(true);
+    expect(await run(['login', '--no-wait', '--no-browser'], terminal.io)).toBe(0);
+    expect(terminal.stdout).toContain(`  ${SESSION.verification_uri_complete}\n`);
+    expect(terminal.stdout).toContain('then run chesly login --wait');
+  });
+
+  it('login_wait_finishes_the_pending_sign_in', async () => {
+    vi.useFakeTimers();
+    const answers = [() => json(400, { error: 'authorization_pending' }), () => json(200, { api_key: KEY, token_type: 'Bearer' })];
+    const calls = mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return answers.shift()?.() ?? json(500, {});
+      return json(200, ME);
+    });
+    expect(await run(['login', '--no-wait', '--no-browser'], captureIo().io)).toBe(0);
+
+    const cap = captureIo();
+    const exit = run(['login', '--wait'], cap.io);
+    // --wait reads the pending file first (real I/O); its first poll's timer comes after.
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
     await vi.runAllTimersAsync();
     expect(await exit).toBe(0);
 
-    expect(spawn).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(spawn).mock.calls[0]?.[1]).toContain(SESSION.verification_uri_complete);
+    const polls = calls.filter((call) => call.url.endsWith('/token'));
+    expect(polls).toHaveLength(2);
+    for (const poll of polls) expect(poll.body).toEqual({ device_code: 'dev_secret_value' });
+    expect(keychain.value).toBe(KEY);
+    expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
+    // Finished: nothing pending is left behind, and no second sign-in started.
+    expect(existsSync(pendingLoginFile(env.home))).toBe(false);
+    expect(calls.filter((call) => call.url.endsWith('/v1/cli/sessions'))).toHaveLength(1);
+  });
+
+  it('login_wait_without_a_pending_sign_in_says_so', async () => {
+    vi.useFakeTimers();
+    const calls = mockFetch(() => json(200, SESSION));
+
+    const none = captureIo();
+    expect(await run(['login', '--wait'], none.io)).toBe(1);
+    expect(JSON.parse(none.stderr)).toMatchObject({ code: 'login_not_started' });
+    expect(calls).toHaveLength(0);
+
+    // A code past its 10 minutes is gone, and so is its file.
+    expect(await run(['login', '--no-wait', '--no-browser'], captureIo().io)).toBe(0);
+    vi.setSystemTime(Date.now() + 601_000);
+    const late = captureIo();
+    expect(await run(['login', '--wait'], late.io)).toBe(1);
+    expect(JSON.parse(late.stderr)).toMatchObject({ code: 'expired_token' });
+    expect(existsSync(pendingLoginFile(env.home))).toBe(false);
+
+    // --key signs in at once: neither step applies to it.
+    const mixed = captureIo();
+    expect(await run(['login', '--key', KEY, '--wait'], mixed.io)).toBe(2);
+    expect(JSON.parse(mixed.stderr)).toMatchObject({ code: 'usage_error' });
   });
 
   it('device_login_always_links_to_the_page_with_the_code', async () => {
