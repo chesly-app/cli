@@ -13,9 +13,30 @@ export const EXIT = {
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
 
 /**
+ * An answer without problem details (a gateway's 502, the sign-in limiter's plain 429) gets the code
+ * `http_<status>` for these statuses, and `http_error` for any other, its status in `status`. A closed
+ * set, so every code the CLI prints has its entry on the docs' errors page.
+ */
+const HTTP_ERROR_TITLES: Readonly<Record<number, string>> = {
+  400: 'Bad Request, without details.',
+  404: 'Not Found, without details.',
+  413: 'Payload Too Large, without details.',
+  429: 'Too Many Requests, without details.',
+  500: 'Internal Server Error, without details.',
+  502: 'Bad Gateway, without details.',
+  503: 'Service Unavailable, without details.',
+  504: 'Gateway Timeout, without details.',
+};
+
+/** The code for an error answer without problem details: `http_502`, or `http_error` for a rarer status. */
+export function httpErrorCode(status: number): string {
+  return status in HTTP_ERROR_TITLES ? `http_${status}` : 'http_error';
+}
+
+/**
  * Every code the CLI raises itself, each with its fixed title, for the docs' errors page (which lists
- * them beside the API's). `npm run export-errors -- <dir>` writes it; a test checks it against the
- * source. A code the API also has keeps the API's title.
+ * them beside the API's). `npm run export-errors -- <dir>` writes it; a test checks it against every
+ * code the CLI can print. A code the API also has keeps the API's title.
  */
 export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> = [
   { code: 'access_denied', title: 'The sign-in was denied.' },
@@ -35,6 +56,8 @@ export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> =
   { code: 'network_error', title: "The CLI couldn't reach the API." },
   { code: 'not_signed_in', title: 'Not signed in.' },
   { code: 'usage_error', title: 'The command is not valid.' },
+  ...Object.entries(HTTP_ERROR_TITLES).map(([status, title]) => ({ code: `http_${status}`, title })),
+  { code: 'http_error', title: 'An HTTP error without details.' },
 ];
 
 /** A keychain call that got no answer in time: the keychain is locked, or a dialog is waiting for someone. */

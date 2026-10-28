@@ -251,7 +251,10 @@ included, on every network but email (add `--network email` for email threads):
   `retry_after` on a 429 or 503). In a terminal, a 429 or 503 ends with `Retry in N s.`
   The CLI's own errors print as `{"type":"https://agents.chesly.app/docs/errors#<code>","title":"...","code":"<code>"}`,
   plus their own fields (`candidates` for an ambiguous chat name, `idempotency_key` for a send that
-  may or may not have gone out).
+  may or may not have gone out). An answer without problem details (a gateway's 502, say) gets
+  problem details built for it, with the code `http_400`, `http_404`, `http_413`, `http_429`,
+  `http_500`, `http_502`, `http_503` or `http_504`, or `http_error` for any other status (the status
+  is in `status`). Every code has its entry at https://agents.chesly.app/docs/errors.
 - **Notices** (a reconnecting `watch`, an expired resume point) go to stderr too, as one JSON line
   each in JSON mode: `{"warning":"<code>","message":"..."}`.
 - **Other people's text** (names, messages) never reaches the terminal raw: tables drop escape

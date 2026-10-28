@@ -1,6 +1,6 @@
 import { STATUS_CODES } from 'node:http';
 import pkg from '../package.json' with { type: 'json' };
-import { AnnotatedError, CliError, EXIT, errorType } from './errors.js';
+import { AnnotatedError, CliError, EXIT, errorType, httpErrorCode } from './errors.js';
 
 export const VERSION: string = pkg.version;
 const DEFAULT_API_URL = 'https://api.chesly.app';
@@ -307,12 +307,12 @@ function queryString(query: Readonly<Record<string, QueryValue>> = {}): string {
 
 /**
  * The error for a refusal. Its code is the answer's `code`, else its OAuth-style `error` (the sign-in
- * endpoints'), when either is token-shaped; else `http_<status>`. An `error` that is a sentence (a
- * rate limiter's message) is the detail, never the code, so the code and its docs link stay stable.
+ * endpoints'), when either is token-shaped; else `http_<status>` (`httpErrorCode`). An `error` that is
+ * a sentence (a rate limiter's message) is the detail, never the code, so codes and docs links stay stable.
  */
 function errorFromResponse(response: Response, body: unknown): CheslyApiError {
   const fields = isRecord(body) ? body : {};
-  const code = token(fields.code) ?? token(fields.error) ?? `http_${response.status}`;
+  const code = token(fields.code) ?? token(fields.error) ?? httpErrorCode(response.status);
   const sentence = token(fields.error) === undefined ? nonEmpty(fields.error) : undefined;
   return new CheslyApiError({
     status: response.status,

@@ -6,6 +6,7 @@ vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./help
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
 import { CliError, EXIT, LOCAL_ERROR_CODES } from '../src/errors.js';
 import { formatWhen, reportError, terminalSafe } from '../src/output.js';
@@ -422,20 +423,32 @@ describe('in a terminal', () => {
 });
 
 describe('cli errors', () => {
-  it('every_cli_error_code_is_exported', () => {
-    // The codes the CLI raises itself, found in its source. auth.ts passes its store failures' codes
-    // through (`new CliError(failure.code, …)`), and each of those is raised literally elsewhere.
+  it('every_cli_error_code_is_exported', async () => {
+    // Every code the CLI can print links to its entry on the docs' errors page, so the export holds
+    // exactly those: the codes its source raises itself, and the http_ codes it builds for answers
+    // without problem details, whatever their status.
     const src = fileURLToPath(new URL('../src', import.meta.url));
     const source = readdirSync(src, { recursive: true, encoding: 'utf8' })
       .filter((file) => file.endsWith('.ts'))
       .map((file) => readFileSync(join(src, file), 'utf8'))
       .join('\n');
-    const raised = new Set(
+    // auth.ts passes its store failures' codes through (`new CliError(failure.code, …)`); each of
+    // those is raised literally elsewhere.
+    const emitted = new Set(
       [...source.matchAll(/new CliError\(\s*'([a-z_]+)'|cliProblem\(\s*'([a-z_]+)'/g)].map((match) => match[1] ?? match[2]),
     );
+    for (let status = 400; status <= 599; status++) {
+      mockFetch(() => new Response('<html>Gateway</html>', { status, headers: { 'content-type': 'text/html' } }));
+      const error = await apiRequest('/v1/me', { key: KEY }).catch((e: unknown) => e);
+      expect(error, String(status)).toBeInstanceOf(CheslyApiError);
+      emitted.add((error as CheslyApiError).code);
+    }
     const listed = LOCAL_ERROR_CODES.map((entry) => entry.code);
 
-    expect([...listed].sort()).toEqual([...raised].sort());
+    expect([...listed].sort()).toEqual([...emitted].sort());
+    for (const code of ['internal_error', 'http_502', 'http_503', 'http_504', 'http_429', 'http_error']) {
+      expect(listed, code).toContain(code);
+    }
     expect(new Set(listed).size).toBe(listed.length);
     for (const { code, title } of LOCAL_ERROR_CODES) {
       expect(code, code).toMatch(/^[a-z][a-z0-9_]*$/);
