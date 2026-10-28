@@ -8,6 +8,7 @@ import {
   readPendingLogin,
   savePendingLogin,
   storeKey,
+  storedKeys,
   type KeyStore,
   type PendingLogin,
 } from '../auth.js';
@@ -18,6 +19,7 @@ import { isMe, type Me } from '../shapes.js';
 
 interface LoginOptions {
   key?: string;
+  force?: boolean;
   /** False with --no-browser. */
   browser?: boolean;
   /** True with --wait, false with --no-wait. */
@@ -30,11 +32,16 @@ export function registerLogin(program: Command, io: Io): void {
     .description('Sign in: approve this computer on web.chesly.app, or store a key with --key')
     .option('--key <key>', 'check an API key with the API, then store it (no browser); - reads it from stdin')
     .option('--no-browser', 'print the link only, without opening a browser')
+    .option('--force', 'sign in with a new key even when the stored one works')
     .option('--wait', 'finish the sign-in --no-wait started: wait for the approval, then store the key')
     .option('--no-wait', 'start a sign-in, print its link and code, and exit at once')
     .addHelpText(
       'after',
       `
+When the key it stored still works, chesly login says "Already signed in"
+and stops: each sign-in makes a key, and an account has 25 at most. --force
+signs in anyway; chesly logout revokes the stored key.
+
 Without --key, chesly login prints a link and a code, opens your browser
 (wherever there is one to show: not over SSH, not in CI, not with
 --no-browser), and waits until you approve the code on web.chesly.app.
@@ -75,6 +82,7 @@ Examples:
         await finishPendingSignIn(out);
         return;
       }
+      if (options.force !== true && (await alreadySignedIn(out))) return;
       const signIn = await startSignIn();
       if (options.wait === false) {
         await savePendingLogin(signIn);
@@ -117,6 +125,30 @@ async function loginWithKey(out: Output, key: string): Promise<void> {
   const me = await apiRequest<unknown>('/v1/me', { key });
   if (!isMe(me)) throw badAnswer('The API sent no details for this key. Nothing was stored.');
   signedIn(out, await storeKey(key), me);
+}
+
+/**
+ * Whether the key `chesly login` stored still works (GET /v1/me), and if so says so: each sign-in
+ * makes a key, and an account has 25 at most. A key the API refuses (401) needs a new sign-in.
+ */
+async function alreadySignedIn(out: Output): Promise<boolean> {
+  const [stored] = await storedKeys();
+  if (stored === undefined) return false;
+  let me: unknown;
+  try {
+    me = await apiRequest<unknown>('/v1/me', { key: stored.key });
+  } catch (error) {
+    if (error instanceof CheslyApiError && error.status === 401) return false;
+    throw error;
+  }
+  if (!isMe(me)) return false;
+  out.result({ status: 'already_signed_in', stored_in: stored.source, key: me.key }, () =>
+    [
+      `Already signed in as "${oneLine(me.key.name ?? '', 100)}" (${scopeLabel(me.key.scope)}), with the key in ${describeSource(stored.source)}.`,
+      'chesly login --force signs in with a new key; chesly logout revokes this one.',
+    ].join('\n'),
+  );
+  return true;
 }
 
 /**

@@ -6,6 +6,7 @@ vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./help
 
 import { run } from '../src/cli.js';
 import { BOOK_CLUB, MOM, inTurn, serve } from './fixtures.js';
+import { runToEnd } from './run-to-end.js';
 import { KEY, captureIo, isolateEnv, json, keychain, lastLine, problem, problemBody, type FetchCall } from './helpers.js';
 
 const SEND_PATH = `/v1/chats/${MOM.id}/messages`;
@@ -41,13 +42,6 @@ const LOOKUP = { '/v1/chats': () => json(200, { chats: [BOOK_CLUB, MOM], next_cu
 
 function sends(calls: FetchCall[]): FetchCall[] {
   return calls.filter((call) => call.method === 'POST' && new URL(call.url).pathname === SEND_PATH);
-}
-
-/** Runs the CLI to its end, moving fake time on until it is done. */
-async function runToEnd(args: string[], io: Parameters<typeof run>[1]): Promise<number> {
-  const exit = run(args, io);
-  await vi.runAllTimersAsync();
-  return exit;
 }
 
 let env: ReturnType<typeof isolateEnv>;

@@ -107,6 +107,19 @@ export async function requireKey(): Promise<{ key: string; source: KeySource }> 
 }
 
 /**
+ * The keys `chesly login` stored, never CHESLY_API_KEY's: the keychain's, then the file's when it
+ * differs. Only well-formed ones. A keychain that fails or never answers is passed over.
+ */
+export async function storedKeys(): Promise<Array<{ key: string; source: KeyStore }>> {
+  const stored: Array<{ key: string; source: KeyStore }> = [];
+  const { key: fromKeychain } = await readKeychain();
+  if (isApiKey(fromKeychain)) stored.push({ key: fromKeychain, source: 'keychain' });
+  const fromFile = await readCredentialsFile();
+  if (isApiKey(fromFile) && fromFile !== fromKeychain) stored.push({ key: fromFile, source: 'file' });
+  return stored;
+}
+
+/**
  * requireKey's key, found once however many times it is asked for: a command that looks up a chat
  * name, then makes its request, reads the keychain once (one `security` run on macOS).
  */

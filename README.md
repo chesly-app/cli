@@ -72,8 +72,14 @@ what it removed in `removed`.
 process list and your shell history. For CI and servers, set `CHESLY_API_KEY` instead. It wins over
 the stored key.
 
-`chesly logout` removes the key from this computer. The key itself keeps working until you revoke
-it: `chesly keys revoke <key_id>`, or the dashboard at https://web.chesly.app/api/keys.
+Each sign-in makes a new key, and an account can have 25. So when the key `chesly login` stored
+still works, `chesly login` says "Already signed in" and stops (`{"status":"already_signed_in",...}`
+in JSON mode). `chesly login --force` signs in anyway, with a new key.
+
+`chesly logout` revokes the key it stored, so the key stops working everywhere, then removes it from
+this computer. When it can't revoke it from here (offline, or a read-only key), it still signs out,
+and says the key is still active: revoke it with `chesly keys revoke <key_id>`, or in the dashboard at
+web.chesly.app/api. `CHESLY_API_KEY` is never touched.
 
 ## Read your chats
 
@@ -230,8 +236,8 @@ With `--json` it prints the API's `GET /v1/me` answer.
 
 | Command | What it does |
 |---|---|
-| `chesly login [--key <key>\|-] [--no-browser] [--no-wait\|--wait]` | Signs in through the browser (in two steps with `--no-wait`, then `--wait`), or stores a key after checking it with `GET /v1/me` |
-| `chesly logout` | Removes the stored key from this computer |
+| `chesly login [--key <key>\|-] [--no-browser] [--no-wait\|--wait] [--force]` | Signs in through the browser (in two steps with `--no-wait`, then `--wait`), or stores a key after checking it with `GET /v1/me`. A stored key that works means "Already signed in", unless `--force` |
+| `chesly logout` | Revokes the stored key (`DELETE /v1/keys/{key_id}`) and removes it from this computer |
 | `chesly whoami` | Shows the key in use: name, scope, API version, limits and usage (`GET /v1/me`) |
 | `chesly key [--reveal]` | Shows the key in use, masked (`ck_live_AbCd…WxYz`); `--reveal` prints the whole key and nothing else |
 | `chesly accounts` | Lists your connected chat accounts and their status (`GET /v1/accounts`) |

@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { describeSource, resolveKey } from '../src/auth.js';
 import { run } from '../src/cli.js';
 import { KeychainTimeoutError } from '../src/errors.js';
+import { runToEnd } from './run-to-end.js';
 import {
   KEY,
   ME,
@@ -107,6 +108,50 @@ describe('chesly login', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('login_with_a_working_stored_key_says_already_signed_in', async () => {
+    // Every sign-in makes a key, and a user has 25 at most: no new one while the stored one works.
+    vi.useFakeTimers();
+    keychain.value = KEY;
+    const calls = mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: keyFor('new'), token_type: 'Bearer' });
+      return json(200, ME);
+    });
+
+    for (const args of [['login'], ['login', '--no-wait']]) {
+      const piped = captureIo();
+      expect(await run(args, piped.io), args.join(' ')).toBe(0);
+      expect(JSON.parse(piped.stdout)).toEqual({ status: 'already_signed_in', stored_in: 'keychain', key: ME.key });
+    }
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual(['/v1/me', '/v1/me']);
+    expect(existsSync(pendingLoginFile(env.home))).toBe(false);
+
+    const terminal = captureIo(true);
+    expect(await run(['login'], terminal.io)).toBe(0);
+    expect(terminal.stdout).toMatch(/^Already signed in as "Chesly CLI on test-host" \(full access\)/);
+    expect(terminal.stdout).toContain('chesly login --force');
+
+    // --force signs in anyway, with a new key.
+    const forced = captureIo();
+    expect(await runToEnd(['login', '--force', '--no-browser'], forced.io)).toBe(0);
+    expect(keychain.value).toBe(keyFor('new'));
+  });
+
+  it('login_with_a_rejected_stored_key_signs_in_again', async () => {
+    vi.useFakeTimers();
+    keychain.value = keyFor('revoked');
+    const calls = mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      return call.headers.authorization === `Bearer ${KEY}` ? json(200, ME) : problem(401, 'invalid_api_key');
+    });
+
+    expect(await runToEnd(['login', '--no-browser'], captureIo().io)).toBe(0);
+
+    expect(calls.some((call) => call.url.endsWith('/v1/cli/sessions'))).toBe(true);
+    expect(keychain.value).toBe(KEY);
+  });
+
   it('login_refuses_something_that_is_not_a_key', async () => {
     const calls = mockFetch(() => json(200, ME));
     const cap = captureIo();
@@ -133,9 +178,7 @@ describe('chesly login', () => {
     });
     const cap = captureIo();
 
-    const exit = run(['login', '--no-browser'], cap.io);
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(0);
+    expect(await runToEnd(['login', '--no-browser'], cap.io)).toBe(0);
 
     const start = calls[0];
     expect(start).toMatchObject({ method: 'POST', url: 'https://api.test/v1/cli/sessions' });
@@ -178,15 +221,15 @@ describe('chesly login', () => {
     });
     const cap = captureIo();
 
-    const exit = run(['login'], cap.io);
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(1);
+    expect(await runToEnd(['login'], cap.io)).toBe(1);
 
     const start = calls[0]?.at ?? 0;
     const polls = calls.filter((call) => call.url.endsWith('/token')).map((call) => call.at - start);
     // 3 s, then 6, 12 and 24 s. The next wait (30 s, the cap) would pass the expiry: it stops there.
     expect(polls).toEqual([3000, 9000, 21000, 45000]);
-    expect(Date.now() - start).toBe(60000);
+    // It ends at the expiry, not a whole 30 s wait past it (75 s); the harness may add a tick.
+    expect(Date.now() - start).toBeGreaterThanOrEqual(60000);
+    expect(Date.now() - start).toBeLessThan(60100);
     expect(JSON.parse(lastLine(cap.stderr))).toMatchObject({ code: 'expired_token' });
     expect(keychain.value).toBeNull();
   });
@@ -203,9 +246,7 @@ describe('chesly login', () => {
     const login = async (args: string[], isTTY: boolean) => {
       vi.mocked(spawn).mockClear();
       keychain.value = null;
-      const exit = run(args, captureIo(isTTY).io);
-      await vi.runAllTimersAsync();
-      expect(await exit, args.join(' ')).toBe(0);
+      expect(await runToEnd(args, captureIo(isTTY).io), args.join(' ')).toBe(0);
       return vi.mocked(spawn).mock.calls;
     };
 
@@ -263,11 +304,7 @@ describe('chesly login', () => {
     expect(await run(['login', '--no-wait', '--no-browser'], captureIo().io)).toBe(0);
 
     const cap = captureIo();
-    const exit = run(['login', '--wait'], cap.io);
-    // --wait reads the pending file first (real I/O); its first poll's timer comes after.
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(0);
+    expect(await runToEnd(['login', '--wait'], cap.io)).toBe(0);
 
     const polls = calls.filter((call) => call.url.endsWith('/token'));
     expect(polls).toHaveLength(2);
@@ -313,16 +350,13 @@ describe('chesly login', () => {
     });
 
     const terminal = captureIo(true);
-    const shown = run(['login'], terminal.io);
-    await vi.runAllTimersAsync();
-    expect(await shown).toBe(0);
+    expect(await runToEnd(['login'], terminal.io)).toBe(0);
     expect(terminal.stderr).toMatch(/^ {2}https:\/\/web\.chesly\.app\/cli\?code=BCDF-GHJK$/m);
     expect(terminal.stderr).not.toMatch(/^ {2}https:\/\/web\.chesly\.app\/cli$/m);
 
+    keychain.value = null; // signed out again: a working stored key would stop the sign-in
     const piped = captureIo();
-    const printed = run(['login'], piped.io);
-    await vi.runAllTimersAsync();
-    expect(await printed).toBe(0);
+    expect(await runToEnd(['login'], piped.io)).toBe(0);
     expect(JSON.parse(firstLine(piped.stderr)).verification_uri_complete).toBe('https://web.chesly.app/cli?code=BCDF-GHJK');
   });
 
@@ -339,10 +373,9 @@ describe('chesly login', () => {
       [['login'], false],
       [['login', '--json'], true],
     ] as const) {
+      keychain.value = null; // signed out again: a working stored key would stop the sign-in
       const cap = captureIo(isTTY);
-      const exit = run([...argv], cap.io);
-      await vi.runAllTimersAsync();
-      expect(await exit).toBe(0);
+      expect(await runToEnd([...argv], cap.io)).toBe(0);
 
       expect(cap.stderr.split('\n').filter(Boolean).map((line) => JSON.parse(line))).toEqual([
         { verification_uri_complete: SESSION.verification_uri_complete, user_code: 'BCDF-GHJK', expires_in: 600 },
@@ -351,10 +384,9 @@ describe('chesly login', () => {
     }
 
     // A terminal still gets the instructions as text.
+    keychain.value = null; // signed out again: a working stored key would stop the sign-in
     const terminal = captureIo(true);
-    const exit = run(['login'], terminal.io);
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(0);
+    expect(await runToEnd(['login'], terminal.io)).toBe(0);
     expect(terminal.stderr).toMatch(/^To sign in, open this link:$/m);
     expect(terminal.stderr).toContain('Approve it if the page shows the code BCDF-GHJK.');
   });
@@ -379,9 +411,7 @@ describe('chesly login', () => {
     const controls = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 
     const login = captureIo(true);
-    const exit = run(['login'], login.io);
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(0);
+    expect(await runToEnd(['login'], login.io)).toBe(0);
     expect(login.stdout + login.stderr).not.toMatch(controls);
     expect(login.stdout).toMatch(/^Signed in with the key "Chesly CLI on \]0;ownedbox x+…" \(full access\)\.$/m);
     expect(login.stdout.split('"')[1]).toHaveLength(100);
@@ -407,9 +437,7 @@ describe('chesly login', () => {
     });
     const cap = captureIo();
 
-    const exit = run(['login'], cap.io);
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(1);
+    expect(await runToEnd(['login'], cap.io)).toBe(1);
 
     expect(keychain.value).toBeNull();
     expect(JSON.parse(lastLine(cap.stderr))).toEqual(
@@ -427,9 +455,7 @@ describe('chesly login', () => {
       const calls = mockFetch((call) => (call.url.endsWith('/v1/cli/sessions') ? json(200, session) : json(200, ME)));
       const cap = captureIo();
 
-      const exit = run(['login'], cap.io);
-      await vi.runAllTimersAsync();
-      expect(await exit).toBe(1);
+      expect(await runToEnd(['login'], cap.io)).toBe(1);
 
       expect(JSON.parse(lastLine(cap.stderr))).toMatchObject({ code: 'invalid_response' });
       expect(cap.stderr).not.toContain('undefined');
@@ -448,9 +474,7 @@ describe('chesly login', () => {
       });
       const cap = captureIo(true);
 
-      const exit = run(['login'], cap.io);
-      await vi.runAllTimersAsync();
-      expect(await exit).toBe(1);
+      expect(await runToEnd(['login'], cap.io)).toBe(1);
 
       expect(keychain.value).toBeNull();
       expect(cap.stdout).toBe('');
@@ -468,9 +492,7 @@ describe('chesly login', () => {
     });
     const cap = captureIo();
 
-    const exit = run(['login'], cap.io);
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(3);
+    expect(await runToEnd(['login'], cap.io)).toBe(3);
 
     expect(keychain.value).toBeNull();
     expect(existsSync(credentialsFile(env.home))).toBe(false);
@@ -489,9 +511,7 @@ describe('chesly login', () => {
     });
 
     const piped = captureIo();
-    const exit = run(['login'], piped.io);
-    await vi.runAllTimersAsync();
-    expect(await exit).toBe(0);
+    expect(await runToEnd(['login'], piped.io)).toBe(0);
     expect(keychain.value).toBe(KEY);
     // stdout still holds the result; every stderr line is JSON: the link, then the warning.
     expect(JSON.parse(piped.stdout)).toEqual({ status: 'signed_in', stored_in: 'keychain', key: null });
@@ -500,9 +520,7 @@ describe('chesly login', () => {
 
     keychain.value = null;
     const terminal = captureIo(true);
-    const shown = run(['login'], terminal.io);
-    await vi.runAllTimersAsync();
-    expect(await shown).toBe(0);
+    expect(await runToEnd(['login'], terminal.io)).toBe(0);
     expect(terminal.stdout).toMatch(/^Signed in, and saved the key in /);
   });
 
@@ -555,9 +573,7 @@ describe('chesly login', () => {
 
         // The device flow keeps its key: the server hands each key out once.
         const device = captureIo(isTTY);
-        const exit = run(['login'], device.io);
-        await vi.runAllTimersAsync();
-        expect(await exit).toBe(1);
+        expect(await runToEnd(['login'], device.io)).toBe(1);
         isProblem(device, isTTY);
         expect(keychain.value).toBe(KEY);
       }
@@ -709,22 +725,87 @@ describe('malformed keys', () => {
 });
 
 describe('chesly logout and chesly key', () => {
-  it('logout_removes_the_stored_key_and_says_it_still_works_until_revoked', async () => {
+  it('logout_revokes_its_key_then_removes_it', async () => {
     keychain.value = KEY;
     writeCredentials(env.home, KEY);
-    const cap = captureIo(true);
+    let storedWhenRevoked: string | null = null;
+    const calls = mockFetch((call) => {
+      if (call.method === 'DELETE') {
+        storedWhenRevoked = keychain.value;
+        return new Response(null, { status: 204 });
+      }
+      return json(200, ME);
+    });
 
-    expect(await run(['logout'], cap.io)).toBe(0);
+    const piped = captureIo();
+    expect(await run(['logout'], piped.io)).toBe(0);
 
+    // The key revokes itself first, so it stops working everywhere; then it leaves this computer.
+    expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual(['GET /v1/me', 'DELETE /v1/keys/key_1']);
+    for (const call of calls) expect(call.headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(storedWhenRevoked).toBe(KEY);
     expect(keychain.value).toBeNull();
     expect(existsSync(credentialsFile(env.home))).toBe(false);
-    expect(cap.stdout).toMatch(/revoke/i);
+    expect(JSON.parse(piped.stdout)).toEqual({ removed: ['keychain', 'file'], revoked: true, env_key_set: false });
+    expect(piped.stderr).toBe('');
+
+    keychain.value = KEY;
+    const terminal = captureIo(true);
+    expect(await run(['logout'], terminal.io)).toBe(0);
+    expect(terminal.stdout).toBe(`Signed out: revoked the key and removed it from ${describeSource('keychain')}.\n`);
+  });
+
+  it('logout_still_signs_out_when_the_key_cannot_be_revoked_and_says_so', async () => {
+    // Before the API can revoke keys (404, 405), for a read-only key (403), or offline, the key
+    // leaves this computer all the same, and logout says it still works.
+    const refusals: Array<() => Response | Promise<Response>> = [
+      () => problem(404, 'not_found'),
+      () => new Response('', { status: 405 }),
+      () => problem(403, 'insufficient_scope'),
+      () => Promise.reject(new TypeError('fetch failed')),
+    ];
+    for (const refusal of refusals) {
+      keychain.value = KEY;
+      mockFetch((call) => (call.method === 'DELETE' ? refusal() : json(200, ME)));
+
+      const piped = captureIo();
+      expect(await run(['logout'], piped.io)).toBe(0);
+      expect(keychain.value).toBeNull();
+      expect(JSON.parse(piped.stdout)).toEqual({ removed: ['keychain'], revoked: false, env_key_set: false });
+      expect(JSON.parse(piped.stderr)).toEqual({
+        warning: 'key_still_active',
+        message: 'This key is still active; revoke it in the dashboard at web.chesly.app/api.',
+      });
+
+      keychain.value = KEY;
+      mockFetch((call) => (call.method === 'DELETE' ? refusal() : json(200, ME)));
+      const terminal = captureIo(true);
+      expect(await run(['logout'], terminal.io)).toBe(0);
+      expect(terminal.stdout).toContain('This key is still active; revoke it in the dashboard at web.chesly.app/api.');
+    }
+
+    // A key the API already refuses is gone: nothing to revoke, nothing to warn about.
+    keychain.value = KEY;
+    mockFetch(() => problem(401, 'invalid_api_key'));
+    const gone = captureIo();
+    expect(await run(['logout'], gone.io)).toBe(0);
+    expect(JSON.parse(gone.stdout)).toEqual({ removed: ['keychain'], revoked: true, env_key_set: false });
+    expect(gone.stderr).toBe('');
+
+    // Nothing stored: no request at all. CHESLY_API_KEY is never revoked by logout.
+    vi.stubEnv('CHESLY_API_KEY', keyFor('env'));
+    const calls = mockFetch(() => json(200, ME));
+    const none = captureIo(true);
+    expect(await run(['logout'], none.io)).toBe(0);
+    expect(calls).toHaveLength(0);
+    expect(none.stdout).toMatch(/^No key was stored on this computer\.\nCHESLY_API_KEY is still set/);
   });
 
   it('logout_removes_the_key_file_even_when_the_keychain_fails', async () => {
     keychain.value = KEY;
     writeCredentials(env.home, KEY);
     keychain.failure = new Error('The user name or passphrase you entered is not correct.');
+    mockFetch((call) => (call.method === 'DELETE' ? new Response(null, { status: 204 }) : json(200, ME)));
     const cap = captureIo();
 
     expect(await run(['logout'], cap.io)).toBe(1);
@@ -738,6 +819,7 @@ describe('chesly logout and chesly key', () => {
   it('logout_removes_the_keychain_entry_even_when_the_file_cannot_go', async () => {
     keychain.value = KEY;
     mkdirSync(credentialsFile(env.home), { recursive: true }); // a directory: rm refuses it
+    mockFetch((call) => (call.method === 'DELETE' ? new Response(null, { status: 204 }) : json(200, ME)));
 
     const piped = captureIo();
     expect(await run(['logout'], piped.io)).toBe(1);
