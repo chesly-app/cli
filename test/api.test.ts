@@ -519,13 +519,18 @@ describe('uploadFile', () => {
 
   it('refuses_a_missing_or_too_large_file_before_any_request', async () => {
     const calls = mockFetch(() => json(201, {}));
+    // The homeserver's own cap (R97): 50,000,000 bytes is the most, one byte more is refused.
     const big = join(env.home, 'big.mp4');
     writeFileSync(big, '');
-    truncateSync(big, 52_428_801);
+    truncateSync(big, 50_000_001);
+    const most = join(env.home, 'most.mp4');
+    writeFileSync(most, '');
+    truncateSync(most, 50_000_000);
 
     await expect(readUpload(join(env.home, 'nope.png'))).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
     await expect(readUpload(env.home)).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
     await expect(readUpload(big)).rejects.toMatchObject({ code: 'media_too_large', exitCode: 1 });
+    await expect(readUpload(most)).resolves.toMatchObject({ size: 50_000_000, name: 'most.mp4' });
     expect(calls).toHaveLength(0);
   });
 

@@ -145,6 +145,8 @@ Pass the text on stdin with a quoted heredoc (`- <<'EOF'`), never as a double-qu
 inside double quotes the shell still expands `$` and backticks, so "It costs $5" would arrive as
 "It costs ", while the quotes around `EOF` keep the text exactly as written.
 
+A file can be at most 50 MB (50,000,000 bytes); a bigger one is refused before anything is uploaded.
+
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
 takes it; `--wait` checks every second, within 30 seconds in all, until it is `sent`, `delivered`
 or `failed`. Each check is a metered API call. A failed delivery exits 1 and says why. Still
