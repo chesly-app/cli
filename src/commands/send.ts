@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
-import { CheslyApiError, apiRequest, idempotentPost, isTransient, sleep } from '../api.js';
+import { CheslyApiError, CheslyNetworkError, apiRequest, idempotentPost, isTransient, sleep } from '../api.js';
 import { keyOnce } from '../auth.js';
-import { CliError, EXIT } from '../errors.js';
+import { AnnotatedError, CliError, EXIT } from '../errors.js';
 import { parseIdempotencyKey, parseNetwork } from '../options.js';
 import { Output, shellQuote, type Io } from '../output.js';
 import { sentLine } from '../render.js';
@@ -19,9 +19,18 @@ interface SendOptions {
   network?: string;
 }
 
-/** How long --wait waits for the network to take a message, and how often it asks. */
+/** How long --wait follows a message, polls included, and how often it asks. */
 const WAIT_MS = 30_000;
 const POLL_MS = 1_000;
+
+/** What --wait saw: the last message it got, and how the wait ended when not on a final status. */
+interface Waited {
+  message: Message;
+  /** Still on its way at the deadline. */
+  stillQueued: boolean;
+  /** Why the delivery couldn't be followed to the end: the last poll's failure. */
+  failure: string | undefined;
+}
 
 export function registerSend(program: Command, io: Io): void {
   program
@@ -46,8 +55,11 @@ ${CHAT_ARGUMENT_HELP}
 
 Prints the message the API answered: its JSON, or "Sent to <chat> · <status>"
 in a terminal. The status is queued until the network takes the message;
-with --wait the command waits for sent, delivered or failed, and a failed
-delivery exits 1 with the reason.
+with --wait the command waits up to 30 s in all for sent, delivered or failed
+(it asks once a second, and each ask is a metered API call), and a failed
+delivery exits 1 with the reason. Once the message went out it is always
+printed, and the exit is 0, even when following it fails: that is a warning
+on stderr (delivery_wait_failed).
 
 Every send carries an Idempotency-Key, and the CLI's own retries (after a
 network error, a 502, 503 or 504, or while a first attempt is still running)
@@ -100,11 +112,30 @@ Examples:
               },
             }),
       });
-      if (!isMessage(answer)) throw new CliError('invalid_response', 'The API sent no message for the send.');
+      if (!isMessage(answer)) {
+        // The send was answered, so it may have gone out: the key asks the API for its answer again.
+        throw new AnnotatedError(
+          new CliError('invalid_response', 'The API sent no message for the send.'),
+          { idempotency_key: idempotencyKey },
+          `It may have gone out. Run the command again with --idempotency-key ${idempotencyKey} to see the API's answer.`,
+        );
+      }
 
-      const { message, waited } = options.wait ? await waitForDelivery(answer, await key()) : { message: answer, waited: false };
+      const waited: Waited = options.wait
+        ? await waitForDelivery(answer, await key())
+        : { message: answer, stillQueued: false, failure: undefined };
+      const { message } = waited;
       out.result(message, () => sentLine(target, message));
-      if (waited && !out.json) out.note(`Still queued after ${WAIT_MS / 1000} s.`);
+      if (waited.failure !== undefined) {
+        out.warn(
+          'delivery_wait_failed',
+          `The message was sent, but following its delivery failed (${waited.failure}). ` +
+            `chesly read shows it, and the same command with --idempotency-key ${idempotencyKey} shows the API's answer.`,
+          { idempotency_key: idempotencyKey },
+        );
+      } else if (waited.stillQueued) {
+        out.note(`Still queued after ${WAIT_MS / 1000} s.`);
+      }
       const delivery = message.delivery;
       if (delivery?.status === 'failed') {
         throw new CliError('delivery_failed', delivery.error?.message ?? 'The network did not take the message.', EXIT.ERROR, {
@@ -132,25 +163,38 @@ async function messageText(text: string | undefined, io: Io): Promise<string | u
 }
 
 /**
- * Polls `GET /v1/messages/{id}` every second until the delivery is sent, delivered or failed, for at
- * most 30 s. `waited` says it was still on its way then. A poll that fails for a moment (no answer, a
- * 5xx, a 429) is skipped; the message was sent either way.
+ * Polls `GET /v1/messages/{id}` once a second until the delivery is sent, delivered or failed, within
+ * one 30 s deadline: each poll gets only the time left. The message went out either way, so nothing
+ * here throws. A poll that fails for a moment (no answer, a 5xx, a 429) is tried again until the
+ * deadline; any other failure (401, 402, 404, an answer that isn't a message) ends the wait at once.
  */
-async function waitForDelivery(sent: Message, key: string): Promise<{ message: Message; waited: boolean }> {
+async function waitForDelivery(sent: Message, key: string): Promise<Waited> {
   let message = sent;
+  let failure: string | undefined;
   const deadline = Date.now() + WAIT_MS;
   while (!settled(message)) {
-    if (Date.now() + POLL_MS > deadline) return { message, waited: true };
+    if (deadline - Date.now() <= POLL_MS) return { message, stillQueued: failure === undefined, failure };
     await sleep(POLL_MS);
     try {
-      const polled = await apiRequest<unknown>(`/v1/messages/${encodeURIComponent(message.id)}`, { key });
-      if (isMessage(polled)) message = polled;
+      const timeoutMs = deadline - Date.now();
+      const polled = await apiRequest<unknown>(`/v1/messages/${encodeURIComponent(message.id)}`, { key, timeoutMs });
+      if (!isMessage(polled)) return { message, stillQueued: false, failure: 'the API sent an answer that is not a message' };
+      message = polled;
+      failure = undefined;
     } catch (error) {
+      failure = pollFailure(error);
       const passing = isTransient(error) || (error instanceof CheslyApiError && error.status === 429);
-      if (!passing) throw error;
+      if (!passing) return { message, stillQueued: false, failure };
     }
   }
-  return { message, waited: false };
+  return { message, stillQueued: false, failure: undefined };
+}
+
+/** A poll's failure in a few words, never the API's own text. */
+function pollFailure(error: unknown): string {
+  if (error instanceof CheslyApiError) return `${error.status} ${error.code}`;
+  if (error instanceof CheslyNetworkError) return 'no answer from the API';
+  return 'an unexpected error';
 }
 
 /** Sent, delivered or failed: nothing more will change. A message without a delivery has none to wait for. */

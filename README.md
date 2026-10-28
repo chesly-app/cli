@@ -119,9 +119,12 @@ chesly send "Mom" "The plan" --media-id media_...    # a file uploaded before (a
 ```
 
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
-takes it; `--wait` checks every second, for up to 30 seconds, until it is `sent`, `delivered` or
-`failed`. A failed delivery exits 1 and says why. Still queued after 30 seconds exits 0, with the
-message as it was.
+takes it; `--wait` checks every second, within 30 seconds in all, until it is `sent`, `delivered`
+or `failed`. Each check is a metered API call. A failed delivery exits 1 and says why. Still
+queued after 30 seconds exits 0, with the message as it was. Once the message went out it is always
+printed and the exit is 0, even if following it fails (a 401 or 402 on a check, say): that is a
+`delivery_wait_failed` warning on stderr, with the `idempotency_key` that asks the API for its
+answer again.
 
 Sends go only to chats you already have: there is no way to start a new conversation. Each
 connected account can send 60 messages an hour and 250 a day on WhatsApp, and 30 an hour and 150 a

@@ -358,6 +358,38 @@ describe('chesly send', () => {
     });
   });
 
+  it('wait_prints_the_message_even_when_following_it_fails', async () => {
+    // The message went out: whatever happens while --wait follows it, the answer is printed and the
+    // exit is 0. The failure is a warning, with the key that asks the API for the message again.
+    vi.useFakeTimers();
+    const id = sent('queued').id;
+    const failures: Array<[string, () => Response]> = [
+      ['a 402', () => problem(402, 'api_plan_required')],
+      ['a 401', () => problem(401, 'invalid_api_key')],
+      ['a 404', () => problem(404, 'message_not_found')],
+      ['an invalid 2xx', () => json(200, { nothing: true })],
+    ];
+    for (const [what, failure] of failures) {
+      const calls = serve({ [SEND_PATH]: () => json(201, sent('queued')), [`/v1/messages/${id}`]: failure });
+      const piped = captureIo();
+      expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], piped.io), what).toBe(0);
+      expect(JSON.parse(piped.stdout), what).toEqual(sent('queued'));
+      expect(JSON.parse(piped.stderr), what).toMatchObject({
+        warning: 'delivery_wait_failed',
+        idempotency_key: sends(calls)[0]?.headers['idempotency-key'],
+      });
+      // It stops at the first such answer: asking again would get the same.
+      expect(calls.filter((call) => call.method === 'GET'), what).toHaveLength(1);
+    }
+
+    // A 5xx is tried again until the deadline; then the failure is the warning.
+    serve({ [SEND_PATH]: () => json(201, sent('queued')), [`/v1/messages/${id}`]: () => problem(503, 'upstream_unavailable') });
+    const terminal = captureIo(true);
+    expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], terminal.io)).toBe(0);
+    expect(terminal.stdout).toBe('Sent to chat_7Hq2mR9xLp4vT1sK8nWz · queued\n');
+    expect(terminal.stderr).toMatch(/^The message was sent, but following its delivery failed/);
+  });
+
   it('wait_gives_up_after_30_s_and_says_still_queued', async () => {
     vi.useFakeTimers();
     const id = sent('queued').id;
@@ -367,10 +399,14 @@ describe('chesly send', () => {
     });
 
     const terminal = captureIo(true);
+    const start = Date.now();
     expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], terminal.io)).toBe(0);
     expect(terminal.stdout).toBe('Sent to chat_7Hq2mR9xLp4vT1sK8nWz · queued\n');
     expect(terminal.stderr).toBe('Still queued after 30 s.\n');
-    expect(calls.filter((call) => call.method === 'GET')).toHaveLength(30);
+    // One deadline for the whole wait: a poll a second, each given only the time left.
+    const polls = calls.filter((call) => call.method === 'GET');
+    expect(polls).toHaveLength(29);
+    expect(Date.now() - start).toBeLessThanOrEqual(30_100);
 
     const piped = captureIo();
     expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], piped.io)).toBe(0);
