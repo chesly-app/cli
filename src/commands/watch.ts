@@ -6,7 +6,7 @@ import { Output, type Io } from '../output.js';
 import { eventLine } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
 import { isApiEvent, type ApiEvent } from '../shapes.js';
-import { IdleTimeoutError, readEventStream } from '../sse.js';
+import { EventStreamLimitError, IdleTimeoutError, readEventStream } from '../sse.js';
 
 interface WatchOptions {
   chat?: string;
@@ -191,6 +191,7 @@ function retryAfterMs(error: unknown): number {
 function dropReason(error: unknown): string {
   if (error === undefined) return 'ended';
   if (error instanceof IdleTimeoutError) return `went quiet for ${error.ms / 1000} s`;
+  if (error instanceof EventStreamLimitError) return `sent a ${error.part} over the size limit`;
   if (error instanceof CheslyApiError) return `was refused (${error.status} ${error.code})`;
   if (error instanceof CheslyNetworkError) return `could not reconnect (${error.message})`;
   return 'dropped';

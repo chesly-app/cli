@@ -124,6 +124,24 @@ describe('readEventStream', () => {
     expect(events.map((event) => event.data)).toEqual(['line 1\nline 2\n\nline 4', 'no space', ' two spaces', '']);
   });
 
+  it('a_line_over_1_mib_or_a_frame_over_4_mib_ends_the_stream', async () => {
+    // A stream that never ends a line, or a frame that never ends, can't fill memory: it is a drop.
+    const mib = 1024 * 1024;
+    const endless = await collect(sseResponse(['data: one\n\n', `data: ${'x'.repeat(mib)}`]));
+    expect(endless.events.map((event) => event.data)).toEqual(['one']);
+    expect(endless.failure).toMatchObject({ name: 'EventStreamLimitError' });
+
+    const line = `data: ${'y'.repeat(mib - 16)}\n`;
+    const huge = await collect(sseResponse([line, line, line, line, line, '\n']));
+    expect(huge.events).toEqual([]);
+    expect(huge.failure).toMatchObject({ name: 'EventStreamLimitError' });
+
+    // Up to the limits is fine.
+    const big = await collect(sseResponse([line, line, line, '\n']));
+    expect(big.failure).toBeUndefined();
+    expect(big.events[0]?.data).toHaveLength(3 * (mib - 16) + 2);
+  });
+
   it('a_stream_quiet_past_the_idle_limit_fails', async () => {
     vi.useFakeTimers();
     const reading = collect(sseResponse(['data: one\n\n'], { end: 'open' }));

@@ -23,6 +23,18 @@ export interface ServerSentEvent {
   retry?: number;
 }
 
+/** The most a line, and a frame, may hold (in characters: bytes, for the API's JSON). */
+const MAX_LINE_CHARS = 1_048_576;
+const MAX_FRAME_CHARS = 4_194_304;
+
+/** A line over 1 MiB, or a frame over 4 MiB: no API event is that big, so the stream is broken. */
+export class EventStreamLimitError extends Error {
+  constructor(readonly part: 'line' | 'frame') {
+    super(part === 'line' ? 'The event stream sent a line over 1 MiB.' : 'The event stream sent an event over 4 MiB.');
+    this.name = 'EventStreamLimitError';
+  }
+}
+
 /** No byte arrived within the idle limit: the connection is most likely gone without a word. */
 export class IdleTimeoutError extends Error {
   constructor(readonly ms: number) {
@@ -33,8 +45,9 @@ export class IdleTimeoutError extends Error {
 
 /**
  * The events of a `text/event-stream` answer, in order. The generator ends when the stream does,
- * and throws when the connection fails or, with `idleTimeoutMs`, when nothing (not even a ping)
- * arrives for that long. Stopping early cancels the answer's body.
+ * and throws when the connection fails, when a line goes over 1 MiB or a frame over 4 MiB
+ * (EventStreamLimitError), or, with `idleTimeoutMs`, when nothing (not even a ping) arrives for that
+ * long. Stopping early cancels the answer's body.
  */
 export async function* readEventStream(
   response: Response,
@@ -78,7 +91,10 @@ export async function* readEventStream(
         const field = colon === -1 ? line : line.slice(0, colon);
         let value = colon === -1 ? '' : line.slice(colon + 1);
         if (value.startsWith(' ')) value = value.slice(1);
-        if (field === 'data') data += `${value}\n`;
+        if (field === 'data') {
+          data += `${value}\n`;
+          if (data.length > MAX_FRAME_CHARS) throw new EventStreamLimitError('frame');
+        }
         else if (field === 'event') type = value;
         else if (field === 'id' && !value.includes('\u0000')) {
           lastId = value;
@@ -108,6 +124,7 @@ class LineSplitter {
     for (let i = 0; i < buffer.length; i++) {
       const char = buffer[i];
       if (char !== '\n' && char !== '\r') continue;
+      if (i - start > MAX_LINE_CHARS) throw new EventStreamLimitError('line');
       lines.push(buffer.slice(start, i));
       if (char === '\r') {
         if (i + 1 === buffer.length) this.afterCr = true;
@@ -116,6 +133,7 @@ class LineSplitter {
       start = i + 1;
     }
     this.pending = buffer.slice(start);
+    if (this.pending.length > MAX_LINE_CHARS) throw new EventStreamLimitError('line');
     return lines;
   }
 }
