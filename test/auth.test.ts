@@ -137,6 +137,30 @@ describe('chesly login', () => {
     expect(keychain.value).toBe(keyFor('new'));
   });
 
+  it('a_keychain_that_fails_stops_login_instead_of_making_another_key', async () => {
+    // A locked keychain may hold a working key: "not signed in" would mint another one.
+    const calls = mockFetch((call) => (call.url.endsWith('/v1/cli/sessions') ? json(200, SESSION) : json(200, ME)));
+    keychain.value = KEY;
+
+    keychain.failure = new Error('User interaction is not allowed.');
+    const refused = captureIo();
+    expect(await run(['login', '--no-wait'], refused.io)).toBe(1);
+    expect(JSON.parse(refused.stderr)).toMatchObject({ code: 'keychain_error' });
+
+    keychain.failure = new KeychainTimeoutError(10);
+    const silent = captureIo();
+    expect(await run(['login', '--no-wait'], silent.io)).toBe(1);
+    expect(JSON.parse(silent.stderr)).toMatchObject({ code: 'keychain_timeout' });
+    expect(calls).toHaveLength(0);
+
+    // A working key in the credentials file settles it without the keychain.
+    writeCredentials(env.home, keyFor('file'));
+    const fromFile = captureIo();
+    expect(await run(['login', '--no-wait'], fromFile.io)).toBe(0);
+    expect(JSON.parse(fromFile.stdout)).toMatchObject({ status: 'already_signed_in', stored_in: 'file' });
+    expect(calls.filter((call) => call.url.endsWith('/v1/cli/sessions'))).toHaveLength(0);
+  });
+
   it('login_with_a_rejected_stored_key_signs_in_again', async () => {
     vi.useFakeTimers();
     keychain.value = keyFor('revoked');

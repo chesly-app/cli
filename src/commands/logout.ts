@@ -29,7 +29,8 @@ Example:
     .action(async (_options: unknown, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const outcomes: Array<'revoked' | 'gone' | 'active'> = [];
-      for (const { key } of await storedKeys()) outcomes.push(await revokeOwnKey(key));
+      // A keychain that fails here fails again below, in deleteStoredKey, which says so.
+      for (const { key } of (await storedKeys()).keys) outcomes.push(await revokeOwnKey(key));
       const removed = await deleteStoredKey();
       const stillActive = outcomes.includes('active');
       const revoked = outcomes.length > 0 && !stillActive;

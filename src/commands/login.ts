@@ -129,19 +129,18 @@ async function loginWithKey(out: Output, key: string): Promise<void> {
 
 /**
  * Whether the key `chesly login` stored still works (GET /v1/me), and if so says so: each sign-in
- * makes a key, and an account has 25 at most. A key the API refuses (401) needs a new sign-in.
+ * makes a key, and an account has 25 at most. A key the API refuses (401) needs a new sign-in. A
+ * keychain that fails or never answers may hold a working key, so without one elsewhere that works,
+ * its failure stops the sign-in rather than minting another key.
  */
 async function alreadySignedIn(out: Output): Promise<boolean> {
-  const [stored] = await storedKeys();
-  if (stored === undefined) return false;
-  let me: unknown;
-  try {
-    me = await apiRequest<unknown>('/v1/me', { key: stored.key });
-  } catch (error) {
-    if (error instanceof CheslyApiError && error.status === 401) return false;
-    throw error;
+  const { keys, keychainFailure } = await storedKeys();
+  const [stored] = keys;
+  const me = stored === undefined ? undefined : await detailsOf(stored.key);
+  if (stored === undefined || me === undefined) {
+    if (keychainFailure !== undefined) throw keychainFailure;
+    return false;
   }
-  if (!isMe(me)) return false;
   out.result({ status: 'already_signed_in', stored_in: stored.source, key: me.key }, () =>
     [
       `Already signed in as "${oneLine(me.key.name ?? '', 100)}" (${scopeLabel(me.key.scope)}), with the key in ${describeSource(stored.source)}.`,
@@ -149,6 +148,17 @@ async function alreadySignedIn(out: Output): Promise<boolean> {
     ].join('\n'),
   );
   return true;
+}
+
+/** The key's details from GET /v1/me, or undefined when the API refuses the key (401) or sends none. */
+async function detailsOf(key: string): Promise<Me | undefined> {
+  try {
+    const me = await apiRequest<unknown>('/v1/me', { key });
+    return isMe(me) ? me : undefined;
+  } catch (error) {
+    if (error instanceof CheslyApiError && error.status === 401) return undefined;
+    throw error;
+  }
 }
 
 /**

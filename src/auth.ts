@@ -108,15 +108,23 @@ export async function requireKey(): Promise<{ key: string; source: KeySource }> 
 
 /**
  * The keys `chesly login` stored, never CHESLY_API_KEY's: the keychain's, then the file's when it
- * differs. Only well-formed ones. A keychain that fails or never answers is passed over.
+ * differs. Only well-formed ones. A keychain that fails or never answers may hold one, so it isn't
+ * "no key": its failure comes back too (keychain_error or keychain_timeout), for the caller to weigh.
  */
-export async function storedKeys(): Promise<Array<{ key: string; source: KeyStore }>> {
-  const stored: Array<{ key: string; source: KeyStore }> = [];
-  const { key: fromKeychain } = await readKeychain();
-  if (isApiKey(fromKeychain)) stored.push({ key: fromKeychain, source: 'keychain' });
+export async function storedKeys(): Promise<{
+  keys: Array<{ key: string; source: KeyStore }>;
+  keychainFailure: CliError | undefined;
+}> {
+  const keys: Array<{ key: string; source: KeyStore }> = [];
+  const fromKeychain = await readKeychain();
+  if (isApiKey(fromKeychain.key)) keys.push({ key: fromKeychain.key, source: 'keychain' });
   const fromFile = await readCredentialsFile();
-  if (isApiKey(fromFile) && fromFile !== fromKeychain) stored.push({ key: fromFile, source: 'file' });
-  return stored;
+  if (isApiKey(fromFile) && fromFile !== fromKeychain.key) keys.push({ key: fromFile, source: 'file' });
+  const failure =
+    fromKeychain.failure === undefined
+      ? undefined
+      : keychainFailure('read the key from', fromKeychain.failure, 'Unlock it (or answer its dialog), then try again.');
+  return { keys, keychainFailure: failure };
 }
 
 /**
