@@ -9,6 +9,8 @@ export interface Io {
   isTTY: boolean;
   /** Read only when a command is told to (`-`): reading a terminal would be a prompt. */
   stdin: { readonly isTTY: boolean; read: () => Promise<string> };
+  /** Calls `handler` on Ctrl+C (SIGINT) instead of exiting. Returns what stops listening. */
+  onInterrupt: (handler: () => void) => () => void;
 }
 
 export function processIo(): Io {
@@ -26,6 +28,17 @@ export function processIo(): Io {
         for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk as Buffer));
         return Buffer.concat(chunks).toString('utf8');
       },
+    },
+    onInterrupt: (handler) => {
+      // A second Ctrl+C exits at once, should stopping hang.
+      let interrupted = false;
+      const listener = () => {
+        if (interrupted) process.exit(130);
+        interrupted = true;
+        handler();
+      };
+      process.on('SIGINT', listener);
+      return () => void process.off('SIGINT', listener);
     },
   };
 }
@@ -59,6 +72,16 @@ export class Output {
    */
   notice(data: unknown, human: () => string): void {
     this.io.err(this.json ? `${toJson(data)}\n` : withNewline(human()));
+  }
+
+  /** A warning on stderr: `{ "warning": <code>, "message", ...extras }` as one JSON line, or the message. */
+  warn(code: string, message: string, extras: Readonly<Record<string, unknown>> = {}): void {
+    this.notice({ warning: code, message, ...extras }, () => message);
+  }
+
+  /** One result of a stream, written at once: `data` as one JSON line, or `human()` in a terminal. */
+  line(data: unknown, human: () => string): void {
+    this.io.out(this.json ? `${toJson(data)}\n` : withNewline(human()));
   }
 }
 

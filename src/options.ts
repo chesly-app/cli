@@ -19,6 +19,13 @@ export function parseCount(value: string): number {
   return count;
 }
 
+/** A comma-separated list such as `--types a,b`: trimmed, without empty or repeated items. */
+export function parseList(value: string): string[] {
+  const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+  if (items.length === 0) throw new InvalidArgumentError('Give one or more names, separated by commas.');
+  return items;
+}
+
 /** The API's Idempotency-Key: 1 to 255 of these characters, which no shell treats specially. */
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,255}$/;
 

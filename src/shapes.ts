@@ -98,6 +98,22 @@ export interface CatchUp {
   truncated: boolean;
 }
 
+/**
+ * An event, as `/v1/events` and its stream send it. `data` depends on `type` (the event catalog):
+ * `{ message, chat }` for message.received, message.sent and message.edited, `{ chat }`, `{ account }`,
+ * or IDs such as `chat_id` and `message_id`.
+ */
+export interface ApiEvent {
+  id: string;
+  type: string;
+  timestamp: string;
+  data: Record<string, unknown>;
+}
+
+export function isApiEvent(value: unknown): value is ApiEvent {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.type === 'string' && isRecord(value.data);
+}
+
 /** `POST /v1/media`: the uploaded file, whose `id` a send takes as `media_id`. */
 export interface MediaUpload {
   id: string;
@@ -110,6 +126,6 @@ export function isMediaUpload(value: unknown): value is MediaUpload {
   return isRecord(value) && typeof value.id === 'string' && value.id !== '';
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

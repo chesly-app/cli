@@ -56,10 +56,18 @@ export async function openFakeKeychain(): Promise<Keychain | null> {
 export function captureIo(
   isTTY = false,
   stdin: { text?: string; isTTY?: boolean } = {},
-): { io: Io; readonly stdout: string; readonly stderr: string; readonly stdinReads: number } {
+): {
+  io: Io;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly stdinReads: number;
+  /** Ctrl+C: what SIGINT does to a run. */
+  interrupt: () => void;
+} {
   let stdout = '';
   let stderr = '';
   let stdinReads = 0;
+  const interruptHandlers = new Set<() => void>();
   const io: Io = {
     out: (text) => {
       stdout += text;
@@ -75,6 +83,10 @@ export function captureIo(
         return stdin.text ?? '';
       },
     },
+    onInterrupt: (handler) => {
+      interruptHandlers.add(handler);
+      return () => interruptHandlers.delete(handler);
+    },
   };
   return {
     io,
@@ -86,6 +98,9 @@ export function captureIo(
     },
     get stdinReads() {
       return stdinReads;
+    },
+    interrupt: () => {
+      for (const handler of [...interruptHandlers]) handler();
     },
   };
 }

@@ -64,17 +64,19 @@ export const MESSAGES = {
 };
 
 /** Answers each request by its path, anything else with a 404 problem, and records the requests. */
-export function serve(routes: Record<string, (call: FetchCall) => Response | Promise<Response>>): FetchCall[] {
+export function serve(routes: Record<string, Answer>): FetchCall[] {
   return mockFetch((call) => routes[new URL(call.url).pathname]?.(call) ?? problem(404, 'not_found'));
 }
 
+type Answer = (call: FetchCall) => Response | Promise<Response>;
+
 /** Each answer in turn, then the last one again. */
-export function inTurn(...answers: Array<() => Response | Promise<Response>>): (call: FetchCall) => Response | Promise<Response> {
+export function inTurn(...answers: Answer[]): Answer {
   let next = 0;
-  return () => {
+  return (call) => {
     const answer = answers[Math.min(next++, answers.length - 1)];
     if (answer === undefined) throw new Error('inTurn needs at least one answer');
-    return answer();
+    return answer(call);
   };
 }
 

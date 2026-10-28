@@ -3,7 +3,7 @@
  * messages) goes through `oneLine` or `terminalSafe` before it is shown. JSON mode never comes here.
  */
 import { formatTable, formatWhen, oneLine, terminalSafe } from './output.js';
-import type { Account, Chat, Message, SearchHit } from './shapes.js';
+import { isMessage, isRecord, type Account, type ApiEvent, type Chat, type Message, type SearchHit } from './shapes.js';
 
 export function scopeLabel(scope: string | undefined): string {
   if (scope === 'full') return 'full access';
@@ -115,6 +115,46 @@ export function sentLine(chat: { id: string; name: string | null }, message: Mes
   const where = oneLine(chat.name ?? '', 60) || chat.id;
   const status = message.delivery?.status;
   return status === undefined ? `Sent to ${where}` : `Sent to ${where} · ${status}`;
+}
+
+/**
+ * One event for people, on one line. A message: `09:05 [whatsapp] Mom — Mom: Are you coming?`.
+ * Anything else: its time and type, then the chat it is about (its name, else its ID) or the account,
+ * with who reacted with what, why a delivery failed, or what changed.
+ */
+export function eventLine(event: ApiEvent): string {
+  const when = formatWhen(event.timestamp, { time: true });
+  const { data } = event;
+  const chat = isRecord(data.chat) ? data.chat : {};
+  if (isMessage(data.message)) {
+    const { message } = data;
+    const network = oneLine(textOf(chat.network), 20);
+    const name = oneLine(textOf(chat.name), 40) || message.chat_id;
+    return `${when} [${network}] ${name} — ${senderLabel(message)}: ${oneLine(messageText(message), 200)}`;
+  }
+  return [when, oneLine(event.type, 40), subjectOf(data, chat)].filter(Boolean).join(' ');
+}
+
+function subjectOf(data: Record<string, unknown>, chat: Record<string, unknown>): string {
+  if (isRecord(data.account)) {
+    const { network, display_name: name, id } = data.account;
+    return [oneLine(textOf(network), 20), oneLine(textOf(name), 60) || textOf(id)].filter(Boolean).join(' ');
+  }
+  const where = oneLine(textOf(chat.name), 40) || oneLine(textOf(data.chat_id), 40) || oneLine(textOf(chat.id), 40);
+  if (isRecord(data.reaction)) {
+    const sender = isRecord(data.reaction.sender) ? data.reaction.sender : {};
+    const who = sender.is_me === true ? 'You' : oneLine(textOf(sender.name), 24) || 'Unknown';
+    return `${where} — ${who}: ${oneLine(textOf(data.reaction.key), 20)}`;
+  }
+  if (isRecord(data.error) && typeof data.error.message === 'string') return `${where}: ${oneLine(data.error.message, 120)}`;
+  if (Array.isArray(data.changes) && data.changes.length > 0) {
+    return `${where} (${oneLine(data.changes.map(String).join(', '), 60)})`;
+  }
+  return where;
+}
+
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
 /** Oldest first. The API sends newest first, so reversing keeps messages sent in the same instant in order. */

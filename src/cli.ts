@@ -9,6 +9,7 @@ import { registerLogout } from './commands/logout.js';
 import { registerRead } from './commands/read.js';
 import { registerSearch } from './commands/search.js';
 import { registerSend } from './commands/send.js';
+import { registerWatch } from './commands/watch.js';
 import { registerWhoami } from './commands/whoami.js';
 import { EXIT } from './errors.js';
 import { formatUsageError, indent, processIo, reportError, type Io } from './output.js';
@@ -66,6 +67,7 @@ function buildProgram(io: Io, json: boolean): Command {
   registerSearch(program, io);
   registerCatchup(program, io);
   registerSend(program, io);
+  registerWatch(program, io);
   return program;
 }
 
