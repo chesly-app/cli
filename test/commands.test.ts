@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Never touch the real keychain, even by accident.
 vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./helpers.js')).openFakeKeychain }));
 
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { run } from '../src/cli.js';
-import { CliError, EXIT } from '../src/errors.js';
+import { CliError, EXIT, LOCAL_ERROR_CODES } from '../src/errors.js';
 import { formatWhen, reportError, terminalSafe } from '../src/output.js';
 import {
   BOOK_CLUB,
@@ -419,6 +422,27 @@ describe('in a terminal', () => {
 });
 
 describe('cli errors', () => {
+  it('every_cli_error_code_is_exported', () => {
+    // The codes the CLI raises itself, found in its source. auth.ts passes its store failures' codes
+    // through (`new CliError(failure.code, …)`), and each of those is raised literally elsewhere.
+    const src = fileURLToPath(new URL('../src', import.meta.url));
+    const source = readdirSync(src, { recursive: true, encoding: 'utf8' })
+      .filter((file) => file.endsWith('.ts'))
+      .map((file) => readFileSync(join(src, file), 'utf8'))
+      .join('\n');
+    const raised = new Set(
+      [...source.matchAll(/new CliError\(\s*'([a-z_]+)'|cliProblem\(\s*'([a-z_]+)'/g)].map((match) => match[1] ?? match[2]),
+    );
+    const listed = LOCAL_ERROR_CODES.map((entry) => entry.code);
+
+    expect([...listed].sort()).toEqual([...raised].sort());
+    expect(new Set(listed).size).toBe(listed.length);
+    for (const { code, title } of LOCAL_ERROR_CODES) {
+      expect(code, code).toMatch(/^[a-z][a-z0-9_]*$/);
+      expect(title, code).toMatch(/^[A-Z].*\.$/);
+    }
+  });
+
   it('extras_join_the_problem_and_the_hint_stays_in_the_terminal', () => {
     const error = new CliError('ambiguous_chat', 'Two chats.', EXIT.NOT_FOUND, { extras: { candidates: [] }, hint: 'Pick one.' });
 

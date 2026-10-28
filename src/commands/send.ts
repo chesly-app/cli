@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import { CheslyApiError, apiRequest, idempotentPost, isTransient, sleep } from '../api.js';
 import { keyOnce } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
-import { parseIdempotencyKey } from '../options.js';
+import { parseIdempotencyKey, parseNetwork } from '../options.js';
 import { Output, type Io } from '../output.js';
 import { sentLine } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
@@ -15,6 +15,7 @@ interface SendOptions {
   file?: string;
   wait?: boolean;
   idempotencyKey?: string;
+  network?: string;
 }
 
 /** How long --wait waits for the network to take a message, and how often it asks. */
@@ -35,6 +36,7 @@ export function registerSend(program: Command, io: Io): void {
       'send at most once per key, however often the command runs (default: a new key)',
       parseIdempotencyKey,
     )
+    .option('--network <name>', 'look the chat name up on this network: email for an email thread', parseNetwork)
     .addHelpText(
       'after',
       `
@@ -46,14 +48,15 @@ with --wait the command waits for sent, delivered or failed, and a failed
 delivery exits 1 with the reason.
 
 Every send carries an Idempotency-Key, and the CLI's own retries (after a
-network error, a 503, or while a first attempt is still running) reuse it,
-so the message goes out at most once. To retry later without sending twice,
-pass the same --idempotency-key again.
+network error, a 502, 503 or 504, or while a first attempt is still running)
+reuse it, so the message goes out at most once. To retry later without
+sending twice, pass the same --idempotency-key again.
 
 Text that starts with - goes after --:  chesly send Mom -- "-5 degrees here"
 
 Examples:
   chesly send "Mom" "On my way" --wait
+  chesly send "Invoice 42" "Paid, thank you." --network email
   echo "The report is attached" | chesly send chat_7Hq2mR9xLp4vT1sK8nWz - --file report.pdf`,
     )
     .action(async (chat: string, text: string | undefined, options: SendOptions, command: Command) => {
@@ -63,7 +66,7 @@ Examples:
         throw new CliError('usage_error', 'Give the text to send, - to read it from stdin, or --file.', EXIT.USAGE);
       }
       const key = keyOnce();
-      const target = await resolveChat(chat, key);
+      const target = await resolveChat(chat, key, { network: options.network });
       const idempotencyKey = options.idempotencyKey ?? randomUUID();
       const media = options.file === undefined ? undefined : await uploadFile(options.file, await key());
       const answer = await idempotentPost<unknown>(`/v1/chats/${encodeURIComponent(target.id)}/messages`, {

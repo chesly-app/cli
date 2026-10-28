@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
-import { parseLimit } from '../options.js';
+import { parseLimit, parseNetwork } from '../options.js';
 import { Output, shellQuote, type Io } from '../output.js';
 import { chatTable } from '../render.js';
 import type { ChatPage } from '../shapes.js';
@@ -9,6 +9,7 @@ import type { ChatPage } from '../shapes.js';
 interface ChatsOptions {
   unread?: boolean;
   account?: string;
+  network?: string;
   limit?: number;
   cursor?: string;
 }
@@ -19,6 +20,7 @@ export function registerChats(program: Command, io: Io): void {
     .description('List your chats, most recent first')
     .option('--unread', 'only chats with unread messages')
     .option('--account <id>', 'only chats on this account: an acct_ ID from `chesly accounts`')
+    .option('--network <name>', 'only this network: email, whatsapp, telegram… (email only when named)', parseNetwork)
     .option('--limit <n>', 'how many chats, 1 to 100 (default 50)', parseLimit)
     .option('--cursor <cursor>', 'the next page: next_cursor from the page before')
     .action(async (options: ChatsOptions, command: Command) => {
@@ -28,6 +30,7 @@ export function registerChats(program: Command, io: Io): void {
         key,
         query: {
           account_id: options.account,
+          network: options.network,
           unread: options.unread ? true : undefined,
           limit: options.limit,
           cursor: options.cursor,
@@ -41,6 +44,7 @@ export function registerChats(program: Command, io: Io): void {
         const flags = [
           options.unread ? '--unread' : '',
           options.account ? `--account ${shellQuote(options.account)}` : '',
+          options.network ? `--network ${options.network}` : '',
           options.limit ? `--limit ${options.limit}` : '',
           `--cursor ${shellQuote(page.next_cursor)}`,
         ];

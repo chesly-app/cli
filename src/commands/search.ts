@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { keyOnce } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
-import { parseLimit } from '../options.js';
+import { parseLimit, parseNetwork } from '../options.js';
 import { Output, type Io } from '../output.js';
 import { searchTable } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
@@ -11,6 +11,7 @@ import type { SearchHit } from '../shapes.js';
 interface SearchOptions {
   chat?: string;
   limit?: number;
+  network?: string;
 }
 
 export function registerSearch(program: Command, io: Io): void {
@@ -20,6 +21,7 @@ export function registerSearch(program: Command, io: Io): void {
     .argument('<query>', 'the words to look for')
     .option('--chat <chat>', 'only this chat: a chat ID (chat_…) or a chat name')
     .option('--limit <n>', 'how many messages, 1 to 100', parseLimit)
+    .option('--network <name>', 'only this network: email, whatsapp, telegram… (email only when named)', parseNetwork)
     .addHelpText(
       'after',
       `
@@ -34,10 +36,11 @@ Examples:
       const q = query.trim();
       if (q === '') throw new CliError('usage_error', 'Give the words to search for.', EXIT.USAGE);
       const key = keyOnce();
-      const chatId = options.chat === undefined ? undefined : (await resolveChat(options.chat, key)).id;
+      const chatId =
+        options.chat === undefined ? undefined : (await resolveChat(options.chat, key, { network: options.network })).id;
       const result = await apiRequest<{ messages: SearchHit[] }>('/v1/messages/search', {
         key: await key(),
-        query: { q, chat_id: chatId, limit: options.limit },
+        query: { q, chat_id: chatId, limit: options.limit, network: options.network },
       });
       out.result(result, () =>
         result.messages.length === 0 ? `No messages match "${q}".` : searchTable(result.messages),

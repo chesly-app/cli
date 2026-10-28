@@ -18,6 +18,7 @@ import {
   json,
   keyFor,
   keychain,
+  lastLine,
   mockFetch,
   problem,
   problemBody,
@@ -276,6 +277,28 @@ describe('output and exit codes', () => {
     expect(cap.stderr).toContain('api.test');
   });
 
+  it('a_refused_connection_names_the_url_and_each_address_tried', async () => {
+    // localhost is ::1 and 127.0.0.1: fetch tries both, and the error that says so has no message.
+    vi.stubEnv('CHESLY_API_KEY', KEY);
+    vi.stubEnv('CHESLY_API_URL', 'http://localhost:3000');
+    const refused = (address: string) =>
+      Object.assign(new Error(`connect ECONNREFUSED ${address}`), { code: 'ECONNREFUSED', syscall: 'connect' });
+    const both = Object.assign(new AggregateError([refused('::1:3000'), refused('127.0.0.1:3000')], ''), {
+      code: 'ECONNREFUSED',
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed', { cause: both }))));
+
+    const terminal = captureIo(true);
+    expect(await run(['whoami'], terminal.io)).toBe(1);
+    expect(terminal.stderr).toBe(
+      "Error: Couldn't reach http://localhost:3000: connect ECONNREFUSED ::1:3000; connect ECONNREFUSED 127.0.0.1:3000\n",
+    );
+
+    const piped = captureIo();
+    expect(await run(['whoami'], piped.io)).toBe(1);
+    expect(JSON.parse(piped.stderr)).toMatchObject({ code: 'network_error', title: expect.stringContaining('127.0.0.1:3000') });
+  });
+
   it('a_failed_request_never_repeats_what_fetch_said', async () => {
     // fetch quotes header values in its errors, the Authorization header among them.
     vi.stubEnv('CHESLY_API_KEY', KEY);
@@ -328,12 +351,53 @@ describe('output and exit codes', () => {
 
     expect(await run(['--help'], cap.io)).toBe(0);
 
-    for (const command of ['login', 'logout', 'whoami', 'key', 'accounts', 'chats', 'read', 'search', 'catchup']) {
+    for (const command of [
+      'login',
+      'logout',
+      'whoami',
+      'key',
+      'accounts',
+      'chats',
+      'read',
+      'search',
+      'catchup',
+      'send',
+      'watch',
+      'webhooks',
+      'keys',
+      'usage',
+    ]) {
       expect(cap.stdout).toMatch(new RegExp(`^  ${command}\\b`, 'm'));
     }
     expect(cap.stdout).toContain('--json');
+    expect(cap.stdout).toContain('--network email');
     expect(cap.stdout).toContain('CHESLY_API_KEY');
+    expect(cap.stdout).toContain('CHESLY_API_URL');
     expect(cap.stdout).toMatch(/3\s+not signed in/i);
+    expect(cap.stdout).toMatch(/6\s+payment required/i);
+  });
+
+  it('no_command_prints_help_to_stderr_and_exits_2_with_a_usage_line_in_json_mode', async () => {
+    const piped = captureIo();
+    expect(await run([], piped.io)).toBe(2);
+    expect(piped.stdout).toBe('');
+    expect(piped.stderr).toMatch(/^Usage: chesly \[options\] \[command\]/);
+    // The last line is the problem an agent parses.
+    expect(JSON.parse(lastLine(piped.stderr))).toEqual(cliProblem('usage_error', 'Give a command; chesly --help lists them.'));
+
+    // A command group without its command is the same.
+    const group = captureIo();
+    expect(await run(['webhooks'], group.io)).toBe(2);
+    expect(group.stderr).toMatch(/^Usage: chesly webhooks/);
+    expect(JSON.parse(lastLine(group.stderr))).toEqual(
+      cliProblem('usage_error', 'Give a command; chesly webhooks --help lists them.'),
+    );
+
+    // A terminal gets the help alone.
+    const terminal = captureIo(true);
+    expect(await run([], terminal.io)).toBe(2);
+    expect(terminal.stderr).toMatch(/^Usage: chesly/);
+    expect(terminal.stderr).not.toContain('usage_error');
   });
 });
 

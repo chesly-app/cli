@@ -372,6 +372,16 @@ function networkReason(error: unknown, timeoutMs: number): string {
   if (current instanceof Error && (current.name === 'TimeoutError' || current.name === 'AbortError')) {
     return `no answer within ${timeoutMs / 1000} s`;
   }
-  if (current instanceof Error && typeof (current as NodeJS.ErrnoException).code === 'string') return current.message;
+  // Each address tried (localhost is ::1 and 127.0.0.1), when the error naming them all says nothing.
+  if (current instanceof AggregateError) {
+    const tried = current.errors.filter(isSystemError).map((attempt) => attempt.message);
+    if (tried.length > 0) return tried.join('; ');
+  }
+  if (isSystemError(current)) return current.message;
   return 'the request failed before it reached the API';
+}
+
+/** An error with a system or TLS code and a message (ECONNREFUSED, ENOTFOUND, CERT_HAS_EXPIRED…). */
+function isSystemError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && typeof (error as NodeJS.ErrnoException).code === 'string' && error.message !== '';
 }

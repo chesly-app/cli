@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
-import { parseCount } from '../options.js';
+import { parseCount, parseNetwork } from '../options.js';
 import { Output, indent, oneLine, type Io } from '../output.js';
 import { transcript } from '../render.js';
 import type { CatchUp } from '../shapes.js';
@@ -9,6 +9,7 @@ import type { CatchUp } from '../shapes.js';
 interface CatchupOptions {
   chats?: number;
   perChat?: number;
+  network?: string;
 }
 
 export function registerCatchup(program: Command, io: Io): void {
@@ -17,6 +18,7 @@ export function registerCatchup(program: Command, io: Io): void {
     .description('Unread chats with their latest messages, in one call')
     .option('--chats <n>', 'how many chats (default 20)', parseCount)
     .option('--per-chat <n>', 'how many messages from each chat (default 5)', parseCount)
+    .option('--network <name>', 'only this network: email, whatsapp, telegram… (email only when named)', parseNetwork)
     .addHelpText(
       'after',
       `
@@ -28,7 +30,7 @@ messages are left out and "truncated" is true; chesly read shows a whole chat.`,
       const { key } = await requireKey();
       const result = await apiRequest<CatchUp>('/v1/catch_up', {
         key,
-        query: { chats: options.chats, per_chat: options.perChat },
+        query: { chats: options.chats, per_chat: options.perChat, network: options.network },
       });
       out.result(result, () => digest(result));
       if (!out.json && result.truncated) {

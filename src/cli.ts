@@ -32,6 +32,11 @@ Output:
 Chats:
 ${indent(CHAT_ARGUMENT_HELP, '  ')}
 
+Networks:
+  chats, catchup and search take --network <name> to list or search one
+  network; read and send take it to look a chat name up there. Email is left
+  out unless you name it, as in chesly chats --network email.
+
 Exit codes:
   0  ok
   1  error
@@ -39,6 +44,13 @@ Exit codes:
   3  not signed in
   4  not found or ambiguous
   5  rate limited
+  6  payment required: an API plan is needed, or a limit of the plan is reached
+
+Examples:
+  chesly catchup                       your unread chats and their latest messages
+  chesly send "Mom" "On my way" --wait
+  chesly watch --json                  live events, one JSON object a line
+  chesly chats --network email         your email threads
 
 Environment:
   CHESLY_API_KEY  the API key to use instead of the stored one
@@ -59,6 +71,13 @@ function buildProgram(io: Io, json: boolean): Command {
     .exitOverride()
     .addHelpText('after', HELP_FOOTER);
   if (!json) program.showHelpAfterError('(run chesly --help for usage)');
+  // A command group run without its command shows its help on stderr, as an error. JSON mode ends
+  // that with a problem line, like every other usage error, so an agent can parse what went wrong.
+  if (json) {
+    program.on('afterAllHelp', (context: { error: boolean; command: Command; write: (text: string) => void }) => {
+      if (context.error) context.write(formatUsageError(`Give a command; ${commandPath(context.command)} --help lists them.`, true));
+    });
+  }
   // Subcommands copy the settings above when they are created, so they come last.
   registerLogin(program, io);
   registerLogout(program, io);
@@ -75,6 +94,13 @@ function buildProgram(io: Io, json: boolean): Command {
   registerKeys(program, io);
   registerUsage(program, io);
   return program;
+}
+
+/** `chesly webhooks` for the webhooks group: the words that run `command`. */
+function commandPath(command: Command): string {
+  const names: string[] = [];
+  for (let current: Command | null = command; current !== null; current = current.parent) names.unshift(current.name());
+  return names.join(' ');
 }
 
 /** Runs the CLI on `argv` (the arguments after `chesly`) and returns the exit code. */

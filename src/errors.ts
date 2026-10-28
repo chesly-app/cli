@@ -12,6 +12,31 @@ export const EXIT = {
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
 
+/**
+ * Every code the CLI raises itself, each with its fixed title, for the docs' errors page (which lists
+ * them beside the API's). `npm run export-errors -- <dir>` writes it; a test checks it against the
+ * source. A code the API also has keeps the API's title.
+ */
+export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> = [
+  { code: 'access_denied', title: 'The sign-in was denied.' },
+  { code: 'ambiguous_chat', title: 'The chat name matches more than one chat.' },
+  { code: 'chat_not_found', title: 'Chat not found.' },
+  { code: 'credentials_file_error', title: "The credentials file couldn't be read or written." },
+  { code: 'delivery_failed', title: 'The network did not take the message.' },
+  { code: 'expired_token', title: 'The sign-in code expired.' },
+  { code: 'file_unreadable', title: "The file can't be read." },
+  { code: 'internal_error', title: 'Something went wrong on our side.' },
+  { code: 'invalid_api_url', title: 'CHESLY_API_URL is not a usable API URL.' },
+  { code: 'invalid_key_format', title: 'The API key is not well formed.' },
+  { code: 'invalid_response', title: "The API's answer is not what the CLI expects." },
+  { code: 'keychain_error', title: 'The OS keychain refused.' },
+  { code: 'keychain_timeout', title: "The OS keychain didn't answer in time." },
+  { code: 'media_too_large', title: 'The media is too large.' },
+  { code: 'network_error', title: "The CLI couldn't reach the API." },
+  { code: 'not_signed_in', title: 'Not signed in.' },
+  { code: 'usage_error', title: 'The command is not valid.' },
+];
+
 /** A keychain call that got no answer in time: the keychain is locked, or a dialog is waiting for someone. */
 export class KeychainTimeoutError extends Error {
   constructor(readonly seconds: number) {

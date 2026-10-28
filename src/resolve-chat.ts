@@ -10,7 +10,9 @@ const LOOKUP_LIMIT = 10;
 /** How a chat argument is read, for `chesly --help` and the help of each command that takes one. */
 export const CHAT_ARGUMENT_HELP = `A <chat> is a chat ID (chat_…) or a name. An exact name wins, in any case;
 so does the only partial match. No match, or several, exits 4, and JSON
-mode lists the chats a name could mean as "candidates".`;
+mode lists the chats a name could mean as "candidates". Names are looked up
+on every network but email; --network names the one to look in (an email
+thread's name is its subject: --network email).`;
 
 /** A chat a command named: its ID, and its name when it was looked up by name. */
 export interface ResolvedChat {
@@ -21,19 +23,24 @@ export interface ResolvedChat {
 /**
  * The chat `arg` names: a chat ID or a chat's name. `key` gives the API key, only when a name needs it.
  * - A `chat_` ID passes through unchecked: the API answers 404 `chat_not_found` for one that isn't yours.
- * - A name is looked up with `GET /v1/chats?q=<name>&archived=all&limit=10`. One exact match, ignoring
- *   case, wins; so does the only partial match.
+ * - A name is looked up with `GET /v1/chats?q=<name>&archived=all&limit=10`, plus `network` when
+ *   `options.network` is set. Without it the API leaves email out, so an email thread needs
+ *   `network: 'email'`. One exact match, ignoring case, wins; so does the only partial match.
  * - No match exits 4 (`chat_not_found`). Several exit 4 (`ambiguous_chat`), with the chats as
  *   `candidates`: the exact matches when there are several, else every match.
  */
-export async function resolveChat(arg: string, key: () => Promise<string>): Promise<ResolvedChat> {
+export async function resolveChat(
+  arg: string,
+  key: () => Promise<string>,
+  options: { network?: string | undefined } = {},
+): Promise<ResolvedChat> {
   const name = arg.trim();
   if (name.startsWith('chat_')) return { id: name, name: null };
   if (name === '') throw new CliError('usage_error', 'Give a chat ID (chat_…) or a chat name.', EXIT.USAGE);
 
   const page = await apiRequest<ChatPage>('/v1/chats', {
     key: await key(),
-    query: { q: name, archived: 'all', limit: LOOKUP_LIMIT },
+    query: { q: name, archived: 'all', limit: LOOKUP_LIMIT, network: options.network },
   });
   // An exact match beats every partial one.
   const exact = page.chats.filter((chat) => sameName(chat.name, name));

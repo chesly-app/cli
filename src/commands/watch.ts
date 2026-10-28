@@ -55,7 +55,8 @@ seen. A resume point older than 4 days starts over from new events, with a
 warning on stderr (a JSON line in JSON mode).
 
 Email events come only when --networks names email, or --account is an
-email account.
+email account. With --networks naming one network, --chat looks its name up
+there, so --chat "Invoice 42" --networks email finds an email thread.
 
 Examples:
   chesly watch --json
@@ -64,7 +65,9 @@ Examples:
     .action(async (options: WatchOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const key = keyOnce();
-      const chatId = options.chat === undefined ? undefined : (await resolveChat(options.chat, key)).id;
+      // A name is looked up on the one network --networks names, if it names one (email included).
+      const network = options.networks?.length === 1 ? options.networks[0] : undefined;
+      const chatId = options.chat === undefined ? undefined : (await resolveChat(options.chat, key, { network })).id;
       const filters = {
         chat_id: chatId,
         account_id: options.account,

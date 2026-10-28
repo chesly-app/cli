@@ -19,6 +19,15 @@ export function parseCount(value: string): number {
   return count;
 }
 
+/** `--network`: one network's name, such as email or whatsapp, in lowercase as the API names them. */
+export function parseNetwork(value: string): string {
+  const network = value.trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(network)) {
+    throw new InvalidArgumentError('Use a network name such as email, whatsapp or telegram.');
+  }
+  return network;
+}
+
 /** A comma-separated list such as `--types a,b`: trimmed, without empty or repeated items. */
 export function parseList(value: string): string[] {
   const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
