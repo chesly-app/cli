@@ -9,6 +9,16 @@ export function registerAccounts(program: Command, io: Io): void {
   program
     .command('accounts')
     .description('List your connected chat accounts and their status')
+    .addHelpText(
+      'after',
+      `
+Prints the API's { "accounts": [...] }, or a table in a terminal: each
+account's ID (acct_…, what --account takes), network, status (connected,
+disconnected or needs attention), when it connected, and its name.
+
+Example:
+  chesly accounts --json`,
+    )
     .action(async (_options: unknown, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const { key } = await requireKey();

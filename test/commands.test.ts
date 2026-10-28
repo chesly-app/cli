@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
-import { CliError, EXIT, LOCAL_ERROR_CODES } from '../src/errors.js';
+import { CliError, EXIT, LOCAL_ERROR_CODES, LOCAL_WARNING_CODES } from '../src/errors.js';
 import { formatWhen, reportError, terminalSafe } from '../src/output.js';
 import {
   BOOK_CLUB,
@@ -576,6 +576,46 @@ describe('cli errors', () => {
     for (const { code, title } of LOCAL_ERROR_CODES) {
       expect(code, code).toMatch(/^[a-z][a-z0-9_]*$/);
       expect(title, code).toMatch(/^[A-Z].*\.$/);
+    }
+  });
+
+  it('every_cli_warning_code_is_exported', () => {
+    // Warnings ({"warning": "<code>"} lines on stderr) are documented beside the errors.
+    const src = fileURLToPath(new URL('../src', import.meta.url));
+    const source = readdirSync(src, { recursive: true, encoding: 'utf8' })
+      .filter((file) => file.endsWith('.ts'))
+      .map((file) => readFileSync(join(src, file), 'utf8'))
+      .join('\n');
+    const used = new Set(
+      [...source.matchAll(/\.warn\(\s*'([a-z_]+)'|warning: '([a-z_]+)'/g)].map((match) => match[1] ?? match[2]),
+    );
+    const listed = LOCAL_WARNING_CODES.map((entry) => entry.code);
+
+    expect([...listed].sort()).toEqual([...used].sort());
+    expect([...listed].sort()).toEqual([
+      'delivery_wait_failed',
+      'env_key_set',
+      'events_expired',
+      'invalid_event',
+      'key_details_unavailable',
+      'key_still_active',
+      'reconnecting',
+    ]);
+    for (const { code, title } of LOCAL_WARNING_CODES) expect(title, code).toMatch(/^[A-Z].*\.$/);
+  });
+
+  it('every_command_says_what_it_prints_with_an_example', async () => {
+    const commands = [
+      ['login'], ['logout'], ['whoami'], ['key'], ['accounts'], ['chats'], ['read'], ['search'], ['catchup'],
+      ['send'], ['watch'], ['webhooks', 'list'], ['webhooks', 'create'], ['webhooks', 'delete'],
+      ['webhooks', 'rotate'], ['webhooks', 'test'], ['webhooks', 'deliveries'], ['keys', 'list'],
+      ['keys', 'revoke'], ['usage'],
+    ];
+    for (const command of commands) {
+      const help = captureIo();
+      expect(await run([...command, '--help'], help.io), command.join(' ')).toBe(0);
+      expect(help.stdout, command.join(' ')).toMatch(/\bprints\b/i);
+      expect(help.stdout, command.join(' ')).toMatch(/^Examples?:/m);
     }
   });
 

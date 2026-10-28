@@ -62,6 +62,20 @@ export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> =
   { code: 'http_error', title: 'An HTTP error without details.' },
 ];
 
+/**
+ * Every warning the CLI prints: `{"warning": "<code>", "message", ...}` lines on stderr in JSON mode,
+ * which never change the exit code. Exported with the errors, for the docs.
+ */
+export const LOCAL_WARNING_CODES: ReadonlyArray<{ code: string; title: string }> = [
+  { code: 'delivery_wait_failed', title: 'The message was sent, but following its delivery failed.' },
+  { code: 'env_key_set', title: 'CHESLY_API_KEY wins over the key login stored.' },
+  { code: 'events_expired', title: 'The resume point is no longer kept, so watching starts from now.' },
+  { code: 'invalid_event', title: 'An event the CLI could not read was skipped.' },
+  { code: 'key_details_unavailable', title: "The new key's details didn't load." },
+  { code: 'key_still_active', title: 'A key this CLI no longer uses is still active.' },
+  { code: 'reconnecting', title: 'The event stream dropped and is reconnecting.' },
+];
+
 /** A keychain call that got no answer in time: the keychain is locked, or a dialog is waiting for someone. */
 export class KeychainTimeoutError extends Error {
   constructor(readonly seconds: number) {

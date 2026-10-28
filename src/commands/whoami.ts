@@ -10,6 +10,16 @@ export function registerWhoami(program: Command, io: Io): void {
   program
     .command('whoami')
     .description('Show the API key in use: its name, scope, API version, limits and usage')
+    .addHelpText(
+      'after',
+      `
+Prints the API's GET /v1/me answer as JSON, or a table in a terminal: the
+key's name, ID and scope, the API version, its limits and this month's
+usage, and where the key in use comes from (masked).
+
+Example:
+  chesly whoami --json`,
+    )
     .action(async (_options: unknown, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const { key, source } = await requireKey();

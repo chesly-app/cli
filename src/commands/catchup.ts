@@ -23,7 +23,15 @@ export function registerCatchup(program: Command, io: Io): void {
       'after',
       `
 Muted and archived chats are left out. When the answer would be too long,
-messages are left out and "truncated" is true; chesly read shows a whole chat.`,
+messages are left out and "truncated" is true; chesly read shows a whole chat.
+
+Prints the API's { "chats": [{ "chat", "messages" }], "truncated" }, or a
+digest in a terminal: each chat's name, network, unread count and ID, then
+its latest messages, oldest first.
+
+Examples:
+  chesly catchup --json
+  chesly catchup --network email --chats 10 --per-chat 3`,
     )
     .action(async (options: CatchupOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());

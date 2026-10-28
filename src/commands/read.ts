@@ -26,8 +26,8 @@ export function registerRead(program: Command, io: Io): void {
       `
 ${CHAT_ARGUMENT_HELP}
 
-A terminal shows the messages oldest first. JSON is the API's page as sent:
-newest first, with next_cursor while there are older messages.
+Prints the API's page as JSON (newest first, with next_cursor while there
+are older messages), or the messages oldest first in a terminal.
 
 Examples:
   chesly read "Mom"

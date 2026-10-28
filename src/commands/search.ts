@@ -27,6 +27,9 @@ export function registerSearch(program: Command, io: Io): void {
       `
 ${CHAT_ARGUMENT_HELP}
 
+Prints the API's { "messages": [...] }, each with its chat's name and
+network, or a table in a terminal.
+
 Examples:
   chesly search "flight number"
   chesly search invoice --chat "Accounting" --limit 10`,
