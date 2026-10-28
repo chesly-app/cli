@@ -160,6 +160,59 @@ describe('chesly watch', () => {
     expect(streams(calls)[1]?.headers['last-event-id']).toBe('evt_1');
   });
 
+  it('an_event_too_large_twice_in_a_row_is_skipped_with_a_warning', async () => {
+    // An event over the size the CLI reads would end every connection at the same place: the second
+    // time, watch resumes after it, and says which event it skipped.
+    const big = `id: evt_big\nevent: message.received\ndata: {"text":"${'x'.repeat(2 * 1024 * 1024)}"}\n\n`;
+    const calls = serve({
+      [STREAM]: inTurn(
+        () => sseResponse([frame(RECEIVED), big]),
+        () => sseResponse([big]),
+        (call) => sseResponse([frame(SENT)], { end: 'open', signal: call.signal }),
+      ),
+    });
+    const cap = captureIo();
+
+    const exit = run(['watch'], cap.io);
+    await vi.waitFor(() => expect(lines(cap.stdout)).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(streams(calls)).toHaveLength(2));
+    await vi.advanceTimersByTimeAsync(6000);
+    await vi.waitFor(() => expect(lines(cap.stdout)).toHaveLength(2));
+    cap.interrupt();
+
+    expect(await exit).toBe(0);
+    const [, second, third] = streams(calls);
+    expect(second?.headers['last-event-id']).toBe('evt_1');
+    // Skipped: resumed after it.
+    expect(third?.headers['last-event-id']).toBe('evt_big');
+    const warnings = lines(cap.stderr).map((line) => JSON.parse(line));
+    expect(warnings.filter((warning) => warning.warning === 'event_too_large')).toEqual([
+      expect.objectContaining({ id: 'evt_big' }),
+    ]);
+  });
+
+  it('the_wait_keeps_growing_while_connections_drop_before_any_event', async () => {
+    const calls = serve({
+      [STREAM]: inTurn(
+        () => sseResponse([': ping\n\n']),
+        () => sseResponse([': ping\n\n']),
+        () => sseResponse([': ping\n\n']),
+        (call) => sseResponse([frame(RECEIVED)], { end: 'open', signal: call.signal }),
+      ),
+    });
+    const cap = captureIo();
+
+    const exit = run(['watch'], cap.io);
+    await vi.waitFor(() => expect(streams(calls)).toHaveLength(1));
+    for (const wait of [3000, 6000, 12000]) await vi.advanceTimersByTimeAsync(wait);
+    await vi.waitFor(() => expect(lines(cap.stdout)).toHaveLength(1));
+    cap.interrupt();
+
+    expect(await exit).toBe(0);
+    expect(lines(cap.stderr).map((line) => JSON.parse(line).retry_in_ms)).toEqual([3000, 6000, 12000]);
+  });
+
   it('an_expired_cursor_warns_and_restarts', async () => {
     const calls = serve({
       [STREAM]: inTurn(

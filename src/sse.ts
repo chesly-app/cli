@@ -27,9 +27,15 @@ export interface ServerSentEvent {
 const MAX_LINE_CHARS = 1_048_576;
 const MAX_FRAME_CHARS = 4_194_304;
 
-/** A line over 1 MiB, or a frame over 4 MiB: no API event is that big, so the stream is broken. */
+/**
+ * A line over 1 MiB, or a frame over 4 MiB. `eventId` is the ID of the event it was in, when the
+ * frame's `id` line came first (as the API sends it), so a reader can skip that event.
+ */
 export class EventStreamLimitError extends Error {
-  constructor(readonly part: 'line' | 'frame') {
+  constructor(
+    readonly part: 'line' | 'frame',
+    readonly eventId: string | null,
+  ) {
     super(part === 'line' ? 'The event stream sent a line over 1 MiB.' : 'The event stream sent an event over 4 MiB.');
     this.name = 'EventStreamLimitError';
   }
@@ -66,7 +72,8 @@ export async function* readEventStream(
     for (;;) {
       const { done, value } = await within(reader.read(), options.idleTimeoutMs);
       if (done) return; // A frame still open here is dropped.
-      for (const line of lines.push(decoder.decode(value, { stream: true }))) {
+      const { complete, overflow } = lines.push(decoder.decode(value, { stream: true }));
+      for (const line of complete) {
         if (line === '') {
           // A blank line ends the frame. One without data is no event, and its type goes with it,
           // but an id it set is still where a reconnect resumes.
@@ -93,7 +100,7 @@ export async function* readEventStream(
         if (value.startsWith(' ')) value = value.slice(1);
         if (field === 'data') {
           data += `${value}\n`;
-          if (data.length > MAX_FRAME_CHARS) throw new EventStreamLimitError('frame');
+          if (data.length > MAX_FRAME_CHARS) throw new EventStreamLimitError('frame', frameHasId ? lastId : null);
         }
         else if (field === 'event') type = value;
         else if (field === 'id' && !value.includes('\u0000')) {
@@ -102,30 +109,35 @@ export async function* readEventStream(
         }
         else if (field === 'retry' && /^[0-9]+$/.test(value)) retry = Number(value);
       }
+      // After the lines before it, so the frame's id line is known.
+      if (overflow) throw new EventStreamLimitError('line', frameHasId ? lastId : null);
     }
   } finally {
     await reader.cancel().catch(() => {});
   }
 }
 
-/** Splits decoded text into lines across reads. A CR that ends one read may be half of a CRLF. */
+/**
+ * Splits decoded text into lines across reads. A CR that ends one read may be half of a CRLF.
+ * `overflow` says a line (complete or not) went over 1 MiB; `complete` holds the lines before it.
+ */
 class LineSplitter {
   private pending = '';
   private afterCr = false;
 
-  push(text: string): string[] {
-    if (text === '') return [];
+  push(text: string): { complete: string[]; overflow: boolean } {
+    if (text === '') return { complete: [], overflow: false };
     let rest = text;
     if (this.afterCr && rest.startsWith('\n')) rest = rest.slice(1);
     this.afterCr = false;
     const buffer = this.pending + rest;
-    const lines: string[] = [];
+    const complete: string[] = [];
     let start = 0;
     for (let i = 0; i < buffer.length; i++) {
       const char = buffer[i];
       if (char !== '\n' && char !== '\r') continue;
-      if (i - start > MAX_LINE_CHARS) throw new EventStreamLimitError('line');
-      lines.push(buffer.slice(start, i));
+      if (i - start > MAX_LINE_CHARS) return { complete, overflow: true };
+      complete.push(buffer.slice(start, i));
       if (char === '\r') {
         if (i + 1 === buffer.length) this.afterCr = true;
         else if (buffer[i + 1] === '\n') i++;
@@ -133,8 +145,7 @@ class LineSplitter {
       start = i + 1;
     }
     this.pending = buffer.slice(start);
-    if (this.pending.length > MAX_LINE_CHARS) throw new EventStreamLimitError('line');
-    return lines;
+    return { complete, overflow: this.pending.length > MAX_LINE_CHARS };
   }
 }
 

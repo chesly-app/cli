@@ -595,6 +595,7 @@ describe('cli errors', () => {
     expect([...listed].sort()).toEqual([
       'delivery_wait_failed',
       'env_key_set',
+      'event_too_large',
       'events_expired',
       'invalid_event',
       'key_details_unavailable',

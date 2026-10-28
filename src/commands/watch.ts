@@ -49,11 +49,13 @@ chat.updated, chat.read, account.connected, account.disconnected,
 account.needs_attention, reaction.added and reaction.removed.
 
 It runs until Ctrl+C, which exits 0. A dropped connection is retried on its
-own, after 3 s and then longer (up to 30 s), resuming after the last event ID
+own, after 3 s and then longer (up to 30 s; it keeps growing while connections
+drop before any event), resuming after the last event ID
 the stream gave: an event's, or the stream's starting point when the API names
 it. From then on nothing is missed; before it, events during a reconnect can
 be (--after <evt_id> pins the start). An event can come twice: skip ids you
-have seen. A resume point older than 4 days starts over from new events, with
+have seen. An event too large to read (over 4 MiB) that ends the connection
+twice in a row is skipped, with an event_too_large warning naming its id. A resume point older than 4 days starts over from new events, with
 a warning on stderr (a JSON line in JSON mode).
 
 Email events come only when --networks names email, or --account is an
@@ -100,6 +102,8 @@ async function watchEvents(
   let retryMs = FIRST_RETRY_MS;
   let failures = 0;
   let connected = false;
+  // The event that last ended a connection by its size: the same one twice in a row is skipped.
+  let tooLarge: string | undefined;
   try {
     while (!stopped.signal.aborted) {
       // One controller per connection: Ctrl+C ends it, and so does leaving this round for any reason.
@@ -115,7 +119,6 @@ async function watchEvents(
           query: { ...filters, after: lastId === undefined ? cursor : undefined },
         });
         connected = true;
-        failures = 0;
         try {
           for await (const event of readEventStream(response, { idleTimeoutMs: IDLE_TIMEOUT_MS })) {
             if (stopped.signal.aborted) return;
@@ -130,6 +133,10 @@ async function watchEvents(
             if (apiEvent === undefined) out.warn('invalid_event', 'Skipped an event that is not an event object.');
             else out.line(apiEvent, () => eventLine(apiEvent));
             lastId = event.id ?? apiEvent?.id ?? lastId;
+            // Only a connection that delivers an event resets the wait: one that drops before
+            // any keeps it growing.
+            failures = 0;
+            tooLarge = undefined;
           }
         } catch (error) {
           dropped = error;
@@ -152,6 +159,23 @@ async function watchEvents(
         connection.abort();
       }
       if (stopped.signal.aborted) return;
+      if (dropped instanceof EventStreamLimitError && dropped.eventId !== null) {
+        if (dropped.eventId === tooLarge) {
+          // The same event ended the connection twice: resume after it, or it would every time.
+          out.warn(
+            'event_too_large',
+            `Skipped event ${dropped.eventId}: it is over the size watch reads (a line over 1 MiB or an event over 4 MiB).`,
+            { id: dropped.eventId },
+          );
+          lastId = dropped.eventId;
+          cursor = undefined;
+          tooLarge = undefined;
+        } else {
+          tooLarge = dropped.eventId;
+        }
+      } else {
+        tooLarge = undefined;
+      }
       const waitMs = Math.max(backoff(retryMs, failures++), retryAfterMs(dropped));
       out.warn('reconnecting', `The event stream ${dropReason(dropped)}. Reconnecting in ${Math.round(waitMs / 1000)} s.`, {
         retry_in_ms: waitMs,

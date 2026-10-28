@@ -183,7 +183,10 @@ When the connection drops, `watch` reconnects by itself (after 3 seconds, then l
 resumes after the last event ID the stream gave it: an event's, or the stream's starting point when
 the API names one. From then on nothing is missed. Before it has one, events that arrive while it
 reconnects can be missed; `--after <evt_id>` pins where it starts. An event can arrive twice, so skip
-IDs you have already handled. A resume point older than 4 days starts again from new events, with
+IDs you have already handled. The wait between tries keeps growing while connections drop before
+delivering any event. An event too large to read (a line over 1 MiB, or over 4 MiB in all) ends the
+connection; if the same one does so twice in a row, `watch` resumes after it and warns
+`event_too_large` with its ID. A resume point older than 4 days starts again from new events, with
 a warning on stderr. Each user can have 5 streams open at once; a sixth exits 5.
 
 ## Webhooks
