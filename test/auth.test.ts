@@ -180,11 +180,46 @@ describe('chesly login', () => {
     expect(await runToEnd(['login', '--force', '--no-browser'], cap.io)).toBe(0);
     expect(keychain.value).toBe(KEY);
     expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
-    // Revoked by ID with the new key, after the new one was stored.
+    // Revoked by ID, by the old key itself (a key may revoke itself, whichever account the new one is
+    // on), after the new one was stored.
     const revoke = calls.find((call) => call.method === 'DELETE');
     expect(revoke?.url).toBe('https://api.test/v1/keys/key_old');
-    expect(revoke?.headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(revoke?.headers.authorization).toBe(`Bearer ${OLD}`);
     expect(cap.stderr).not.toContain('key_still_active');
+
+    // A read-only old key can't revoke itself (403): the new key does it.
+    keychain.value = OLD;
+    calls = mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      if (call.method === 'DELETE') {
+        return call.headers.authorization === `Bearer ${OLD}` ? problem(403, 'insufficient_scope') : new Response(null, { status: 204 });
+      }
+      return json(200, call.headers.authorization === `Bearer ${OLD}` ? oldMe : ME);
+    });
+    const readOnly = captureIo();
+    expect(await runToEnd(['login', '--force', '--no-browser'], readOnly.io)).toBe(0);
+    expect(calls.filter((call) => call.method === 'DELETE').map((call) => call.headers.authorization)).toEqual([
+      `Bearer ${OLD}`,
+      `Bearer ${KEY}`,
+    ]);
+    expect(readOnly.stderr).not.toContain('key_still_active');
+
+    // Switching accounts with a read-only old key: the new key's account doesn't have it (404
+    // key_not_found). That isn't "gone": the old key is named.
+    keychain.value = OLD;
+    mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      if (call.method === 'DELETE') {
+        return call.headers.authorization === `Bearer ${OLD}` ? problem(403, 'insufficient_scope') : problem(404, 'key_not_found');
+      }
+      return json(200, call.headers.authorization === `Bearer ${OLD}` ? oldMe : ME);
+    });
+    const switched = captureIo();
+    expect(await runToEnd(['login', '--force', '--no-browser'], switched.io)).toBe(0);
+    expect(switched.stderr).toContain('"warning":"key_still_active"');
+    expect(switched.stderr).toContain('"id":"key_old"');
 
     // When it can't be revoked, its ID and safe parts are printed, and the sign-in still succeeds.
     keychain.value = OLD;

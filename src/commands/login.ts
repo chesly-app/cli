@@ -188,9 +188,9 @@ async function finishPendingSignIn(out: Output): Promise<void> {
 }
 
 /**
- * Revokes the stored key a new sign-in just replaced, with the new key (which can revoke even a
- * read-only one): unrevoked, it would stay active and count toward the 25. Best effort: when it can't
- * be revoked, a key_still_active warning names it (ID, first 12 and last 4) for the dashboard.
+ * Revokes the stored key a new sign-in just replaced, by that key itself (the new key only when the
+ * old one is read-only): unrevoked, it would stay active and count toward the 25. Best effort: when it
+ * can't be revoked, a key_still_active warning names it (ID, first 12 and last 4) for the dashboard.
  */
 async function retireReplacedKey(out: Output, replaced: string | undefined, key: string): Promise<void> {
   if (replaced === undefined || replaced === key) return;

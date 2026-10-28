@@ -17,24 +17,44 @@ export interface Revocation {
 const REVOKE_TIMEOUT_MS = 10_000;
 
 /**
- * Revokes `key`: `GET /v1/me` with it names its ID, then `DELETE /v1/keys/{id}` with `using` (the key
- * itself by default; a newer full key can revoke a read-only one). A key the API already refuses
- * (401), or no longer has (404 `key_not_found`), is gone. Anything else (offline, a read-only key's
- * 403, an API that can't revoke keys yet: 404, 405) leaves it active.
+ * Revokes `key`: `GET /v1/me` with it names its ID, then `DELETE /v1/keys/{id}`, by the key itself, so
+ * it works whichever account another key is on. Only when the key may not (a read-only key: 403) does
+ * `fallback`, a full key of the same user, try. A key the API already refuses (401) is gone, and so is
+ * one that asking about itself finds missing (404 `key_not_found`); the fallback's 404 means only
+ * that its account doesn't have it. Anything else (offline, an API that can't revoke keys yet: 404,
+ * 405) leaves it active.
  */
-export async function revokeKey(key: string, using: string = key): Promise<Revocation> {
+export async function revokeKey(key: string, fallback?: string): Promise<Revocation> {
   const { prefix, last4 } = keyHint(key);
-  let id: string | null = null;
+  let id: string;
   try {
     const me = await apiRequest<unknown>('/v1/me', { key, timeoutMs: REVOKE_TIMEOUT_MS });
-    if (!isMe(me)) return { id, prefix, last4, outcome: 'active' };
+    if (!isMe(me)) return { id: null, prefix, last4, outcome: 'active' };
     id = me.key.id;
-    await apiRequest<unknown>(`/v1/keys/${encodeURIComponent(id)}`, { method: 'DELETE', key: using, timeoutMs: REVOKE_TIMEOUT_MS });
-    return { id, prefix, last4, outcome: 'revoked' };
   } catch (error) {
-    const refused = error instanceof CheslyApiError && id === null && error.status === 401;
-    const unknown = error instanceof CheslyApiError && error.status === 404 && error.code === 'key_not_found';
-    return { id, prefix, last4, outcome: refused || unknown ? 'gone' : 'active' };
+    const refused = error instanceof CheslyApiError && error.status === 401;
+    return { id: null, prefix, last4, outcome: refused ? 'gone' : 'active' };
+  }
+  let outcome = await deleteKey(id, key, true);
+  if (outcome === 'forbidden' && fallback !== undefined) outcome = await deleteKey(id, fallback, false);
+  return { id, prefix, last4, outcome: outcome === 'forbidden' ? 'active' : outcome };
+}
+
+/** `DELETE /v1/keys/{id}` with `using`; `self` says `using` is that very key. */
+async function deleteKey(
+  id: string,
+  using: string,
+  self: boolean,
+): Promise<'revoked' | 'gone' | 'active' | 'forbidden'> {
+  try {
+    await apiRequest<unknown>(`/v1/keys/${encodeURIComponent(id)}`, { method: 'DELETE', key: using, timeoutMs: REVOKE_TIMEOUT_MS });
+    return 'revoked';
+  } catch (error) {
+    if (!(error instanceof CheslyApiError)) return 'active';
+    if (error.status === 403) return 'forbidden';
+    // Revoked between the two calls: the key itself now finds itself gone.
+    if (self && (error.status === 401 || (error.status === 404 && error.code === 'key_not_found'))) return 'gone';
+    return 'active';
   }
 }
 
