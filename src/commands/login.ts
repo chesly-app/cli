@@ -16,6 +16,7 @@ import { CliError, EXIT } from '../errors.js';
 import { Output, oneLine, terminalSafe, type Io } from '../output.js';
 import { scopeLabel } from '../render.js';
 import { isMe, type Me } from '../shapes.js';
+import { revokeKey, stillActiveMessage } from './keys.js';
 
 interface LoginOptions {
   key?: string;
@@ -32,7 +33,7 @@ export function registerLogin(program: Command, io: Io): void {
     .description('Sign in: approve this computer on web.chesly.app, or store a key with --key')
     .option('--key <key>', 'check an API key with the API, then store it (no browser); - reads it from stdin')
     .option('--no-browser', 'print the link only, without opening a browser')
-    .option('--force', 'sign in with a new key even when the stored one works')
+    .option('--force', 'sign in with a new key even when the stored one works (which is then revoked)')
     .option('--wait', 'finish the sign-in --no-wait started: wait for the approval, then store the key')
     .option('--no-wait', 'start a sign-in, print its link and code, and exit at once')
     .addHelpText(
@@ -40,7 +41,8 @@ export function registerLogin(program: Command, io: Io): void {
       `
 When the key it stored still works, chesly login says "Already signed in"
 and stops: each sign-in makes a key, and an account has 25 at most. --force
-signs in anyway; chesly logout revokes the stored key.
+signs in anyway, and revokes the key the new one replaces (or names it, if
+it can't); chesly logout revokes the stored key.
 
 Without --key, chesly login prints a link and a code, opens your browser
 (wherever there is one to show: not over SSH, not in CI, not with
@@ -82,7 +84,8 @@ Examples:
         await finishPendingSignIn(out);
         return;
       }
-      if (options.force !== true && (await alreadySignedIn(out))) return;
+      const stored = await storedKeys();
+      if (options.force !== true && (await alreadySignedIn(out, stored))) return;
       const signIn = await startSignIn();
       if (options.wait === false) {
         await savePendingLogin(signIn);
@@ -93,7 +96,9 @@ Examples:
       showLink(out, signIn);
       const opened = options.browser !== false && openBrowser(signIn.link);
       out.note(`${opened ? 'Opened your browser. ' : ''}Waiting for approval… (Ctrl+C to cancel)`);
-      await keepKey(out, await pollForKey(signIn));
+      const key = await pollForKey(signIn);
+      await keepKey(out, key);
+      await retireReplacedKey(out, stored.keys[0]?.key, key);
     });
 }
 
@@ -133,8 +138,7 @@ async function loginWithKey(out: Output, key: string): Promise<void> {
  * keychain that fails or never answers may hold a working key, so without one elsewhere that works,
  * its failure stops the sign-in rather than minting another key.
  */
-async function alreadySignedIn(out: Output): Promise<boolean> {
-  const { keys, keychainFailure } = await storedKeys();
+async function alreadySignedIn(out: Output, { keys, keychainFailure }: Awaited<ReturnType<typeof storedKeys>>): Promise<boolean> {
   const [stored] = keys;
   const me = stored === undefined ? undefined : await detailsOf(stored.key);
   if (stored === undefined || me === undefined) {
@@ -178,7 +182,25 @@ async function finishPendingSignIn(out: Output): Promise<void> {
   } finally {
     await deletePendingLogin();
   }
+  const replaced = (await storedKeys()).keys[0]?.key;
   await keepKey(out, key);
+  await retireReplacedKey(out, replaced, key);
+}
+
+/**
+ * Revokes the stored key a new sign-in just replaced, with the new key (which can revoke even a
+ * read-only one): unrevoked, it would stay active and count toward the 25. Best effort: when it can't
+ * be revoked, a key_still_active warning names it (ID, first 12 and last 4) for the dashboard.
+ */
+async function retireReplacedKey(out: Output, replaced: string | undefined, key: string): Promise<void> {
+  if (replaced === undefined || replaced === key) return;
+  const revocation = await revokeKey(replaced, key);
+  if (revocation.outcome === 'revoked') {
+    out.note(`Revoked the key this one replaced${revocation.id === null ? '' : ` (id ${revocation.id})`}.`);
+  } else if (revocation.outcome === 'active') {
+    const { id, prefix, last4 } = revocation;
+    out.warn('key_still_active', stillActiveMessage(revocation, 'The key this replaced'), { id, prefix, last4 });
+  }
 }
 
 /**

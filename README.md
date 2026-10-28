@@ -74,7 +74,9 @@ the stored key.
 
 Each sign-in makes a new key, and an account can have 25. So when the key `chesly login` stored
 still works, `chesly login` says "Already signed in" and stops (`{"status":"already_signed_in",...}`
-in JSON mode). `chesly login --force` signs in anyway, with a new key.
+in JSON mode). `chesly login --force` signs in anyway, with a new key, and revokes the key it
+replaces; if it can't, a `key_still_active` warning names that key (ID, first 12 and last 4
+characters) for the dashboard. The two-step sign-in below does the same when `--wait` stores its key.
 
 `chesly logout` revokes the key it stored, so the key stops working everywhere, then removes it from
 this computer. When it can't revoke it from here (offline, or a read-only key), it still signs out,

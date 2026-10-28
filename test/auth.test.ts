@@ -161,6 +161,55 @@ describe('chesly login', () => {
     expect(calls.filter((call) => call.url.endsWith('/v1/cli/sessions'))).toHaveLength(0);
   });
 
+  it('force_revokes_the_key_it_replaces', async () => {
+    // A new key replaces the stored one: the old one would otherwise stay active, unseen, toward the cap.
+    vi.useFakeTimers();
+    const OLD = keyFor('old');
+    const oldMe = { ...ME, key: { ...ME.key, id: 'key_old' } };
+    const serveSignIn = (onDelete: () => Response) =>
+      mockFetch((call) => {
+        if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+        if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+        if (call.method === 'DELETE') return onDelete();
+        return json(200, call.headers.authorization === `Bearer ${OLD}` ? oldMe : ME);
+      });
+
+    keychain.value = OLD;
+    let calls = serveSignIn(() => new Response(null, { status: 204 }));
+    const cap = captureIo();
+    expect(await runToEnd(['login', '--force', '--no-browser'], cap.io)).toBe(0);
+    expect(keychain.value).toBe(KEY);
+    expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
+    // Revoked by ID with the new key, after the new one was stored.
+    const revoke = calls.find((call) => call.method === 'DELETE');
+    expect(revoke?.url).toBe('https://api.test/v1/keys/key_old');
+    expect(revoke?.headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(cap.stderr).not.toContain('key_still_active');
+
+    // When it can't be revoked, its ID and safe parts are printed, and the sign-in still succeeds.
+    keychain.value = OLD;
+    calls = serveSignIn(() => problem(404, 'not_found'));
+    const failed = captureIo();
+    expect(await runToEnd(['login', '--force', '--no-browser'], failed.io)).toBe(0);
+    const warning = failed.stderr
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .find((line) => line.warning === 'key_still_active');
+    expect(warning).toMatchObject({ id: 'key_old', prefix: OLD.slice(0, 12), last4: OLD.slice(-4) });
+    expect(warning.message).toBe(
+      `The key this replaced (${OLD.slice(0, 12)}…${OLD.slice(-4)}, id key_old) is still active; revoke it in the dashboard at web.chesly.app/api/keys.`,
+    );
+
+    // The two-step sign-in does the same when --wait stores the new key.
+    keychain.value = OLD;
+    calls = serveSignIn(() => new Response(null, { status: 204 }));
+    expect(await run(['login', '--no-wait', '--force', '--no-browser'], captureIo().io)).toBe(0);
+    expect(await runToEnd(['login', '--wait'], captureIo().io)).toBe(0);
+    expect(keychain.value).toBe(KEY);
+    expect(calls.filter((call) => call.method === 'DELETE').map((call) => call.url)).toEqual(['https://api.test/v1/keys/key_old']);
+  });
+
   it('login_with_a_rejected_stored_key_signs_in_again', async () => {
     vi.useFakeTimers();
     keychain.value = keyFor('revoked');
