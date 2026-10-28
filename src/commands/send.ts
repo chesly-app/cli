@@ -7,7 +7,7 @@ import { parseIdempotencyKey, parseNetwork } from '../options.js';
 import { Output, shellQuote, type Io } from '../output.js';
 import { sentLine } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
-import { isMessage, type Message } from '../shapes.js';
+import { deliveryState, isMessage, type Message } from '../shapes.js';
 import { readUpload, uploadFile } from '../upload.js';
 
 interface SendOptions {
@@ -27,8 +27,8 @@ const MIN_POLL_MS = 1_000;
 /** What --wait saw: the last message it got, and how the wait ended when not on a final status. */
 interface Waited {
   message: Message;
-  /** Still on its way at the deadline. */
-  stillQueued: boolean;
+  /** The deadline came before a final status. */
+  ranOut: boolean;
   /** Why the delivery couldn't be followed to the end: the last poll's failure. */
   failure: string | undefined;
 }
@@ -57,10 +57,13 @@ ${CHAT_ARGUMENT_HELP}
 Prints the message the API answered: its JSON, or "Sent to <chat> · <status>"
 in a terminal. The status is queued until the network takes the message;
 with --wait the command waits up to 30 s in all for sent, delivered or failed
-(it asks once a second, and each ask is a metered API call), and a failed
-delivery exits 1 with the reason. Once the message went out it is always
-printed, and the exit is 0, even when following it fails: that is a warning
-on stderr (delivery_wait_failed).
+(it asks once a second, and each ask is a metered API call). A failure the
+network confirms exits 1 (delivery_failed) with the reason. One it didn't
+confirm reads "unconfirmed": the message may have been delivered, so check the
+chat before you send it again; --wait goes on asking, and if it stays
+unconfirmed the command exits 5 (delivery_unconfirmed). Once the message went
+out it is always printed, and following it failing is only a warning on stderr
+(delivery_wait_failed).
 
 Every send carries an Idempotency-Key, and the CLI's own retries (after a
 network error, a 502, 503 or 504, or while a first attempt is still running)
@@ -130,8 +133,9 @@ Examples:
 
       const waited: Waited = options.wait
         ? await waitForDelivery(answer, await key())
-        : { message: answer, stillQueued: false, failure: undefined };
+        : { message: answer, ranOut: false, failure: undefined };
       const { message } = waited;
+      const state = deliveryState(message.delivery);
       out.result(message, () => sentLine(target, message));
       if (waited.failure !== undefined) {
         out.warn(
@@ -140,14 +144,23 @@ Examples:
             `chesly read shows it, and the command run again with ${again.flags} shows the API's answer.`,
           again.extras,
         );
-      } else if (waited.stillQueued) {
+      } else if (waited.ranOut && state === 'queued') {
         out.note(`Still queued after ${WAIT_MS / 1000} s.`);
       }
       const delivery = message.delivery;
-      if (delivery?.status === 'failed') {
-        throw new CliError('delivery_failed', delivery.error?.message ?? 'The network did not take the message.', EXIT.ERROR, {
+      if (state === 'failed') {
+        throw new CliError('delivery_failed', delivery?.error?.message ?? 'The network did not take the message.', EXIT.ERROR, {
           extras: { message_id: message.id, delivery },
         });
+      }
+      if (state === 'unconfirmed') {
+        // Never "failed, resend" (R96): the message may have arrived. 5, like any outcome to come back to.
+        throw new CliError(
+          'delivery_unconfirmed',
+          "The network didn't confirm the message, so it may have been delivered. Check the chat before you send it again.",
+          EXIT.RETRY_LATER,
+          { extras: { message_id: message.id, delivery } },
+        );
       }
     });
 }
@@ -181,23 +194,23 @@ async function waitForDelivery(sent: Message, key: string): Promise<Waited> {
   let failure: string | undefined;
   const deadline = Date.now() + WAIT_MS;
   while (!settled(message)) {
-    if (deadline - Date.now() < POLL_MS + MIN_POLL_MS) return { message, stillQueued: failure === undefined, failure };
+    if (deadline - Date.now() < POLL_MS + MIN_POLL_MS) return { message, ranOut: failure === undefined, failure };
     await sleep(POLL_MS);
     try {
       const timeoutMs = deadline - Date.now();
       const polled = await apiRequest<unknown>(`/v1/messages/${encodeURIComponent(message.id)}`, { key, timeoutMs });
-      if (!isMessage(polled)) return { message, stillQueued: false, failure: 'the API sent an answer that is not a message' };
+      if (!isMessage(polled)) return { message, ranOut: false, failure: 'the API sent an answer that is not a message' };
       message = polled;
       failure = undefined;
     } catch (error) {
       // A poll's time limit is the time left: running out is the wait ending, not a failure.
-      if (error instanceof CheslyNetworkError && error.timedOut) return { message, stillQueued: true, failure: undefined };
+      if (error instanceof CheslyNetworkError && error.timedOut) return { message, ranOut: true, failure: undefined };
       failure = pollFailure(error);
       const passing = isTransient(error) || (error instanceof CheslyApiError && error.status === 429);
-      if (!passing) return { message, stillQueued: false, failure };
+      if (!passing) return { message, ranOut: false, failure };
     }
   }
-  return { message, stillQueued: false, failure: undefined };
+  return { message, ranOut: false, failure: undefined };
 }
 
 /** A poll's failure in a few words, never the API's own text. */
@@ -207,8 +220,12 @@ function pollFailure(error: unknown): string {
   return 'an unexpected error';
 }
 
-/** Sent, delivered or failed: nothing more will change. A message without a delivery has none to wait for. */
+/**
+ * Sent, delivered, or a failure the network confirmed: nothing more will change. An unconfirmed
+ * failure can still turn out sent, or certain (R98), so --wait goes on asking. A message without a
+ * delivery has none to wait for.
+ */
 function settled(message: Message): boolean {
-  const status = message.delivery?.status;
-  return status === undefined || status === 'sent' || status === 'delivered' || status === 'failed';
+  const state = deliveryState(message.delivery);
+  return state === undefined || state === 'sent' || state === 'delivered' || state === 'failed';
 }

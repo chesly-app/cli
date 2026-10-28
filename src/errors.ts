@@ -45,6 +45,7 @@ export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> =
   { code: 'chat_not_found', title: 'Chat not found.' },
   { code: 'credentials_file_error', title: "The credentials file couldn't be read or written." },
   { code: 'delivery_failed', title: 'The network did not take the message.' },
+  { code: 'delivery_unconfirmed', title: "The network didn't confirm the message, so it may have been delivered." },
   { code: 'expired_token', title: 'The sign-in code expired.' },
   { code: 'file_unreadable', title: "The file can't be read." },
   { code: 'internal_error', title: 'Something went wrong on our side.' },

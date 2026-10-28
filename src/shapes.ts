@@ -148,6 +148,19 @@ export interface Delivery {
   updated_at: string;
 }
 
+/**
+ * Where a delivery stands: its status, except that a failure is `unconfirmed` unless the API says it
+ * is certain (R96: a timeout or an unexplained bridge error may still have delivered the message, and
+ * reading it as failed invites a duplicate resend). Undefined for a message without a delivery.
+ */
+export function deliveryState(
+  delivery: Delivery | null | undefined,
+): 'queued' | 'sent' | 'delivered' | 'failed' | 'unconfirmed' | undefined {
+  if (delivery === null || delivery === undefined) return undefined;
+  if (delivery.status === 'failed') return delivery.error?.certain === true ? 'failed' : 'unconfirmed';
+  return delivery.status;
+}
+
 /** Whether `value` is a message: the answer to a send, or to `GET /v1/messages/{id}`. */
 export function isMessage(value: unknown): value is Message {
   return isRecord(value) && typeof value.id === 'string' && value.id !== '' && typeof value.chat_id === 'string';

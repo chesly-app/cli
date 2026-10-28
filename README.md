@@ -149,7 +149,12 @@ A file can be at most 50 MB (50,000,000 bytes); a bigger one is refused before a
 
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
 takes it; `--wait` checks every second, within 30 seconds in all, until it is `sent`, `delivered`
-or `failed`. Each check is a metered API call. A failed delivery exits 1 and says why. Still
+or `failed`. Each check is a metered API call. A failure the network confirms exits 1
+(`delivery_failed`) and says why. One it didn't confirm (`delivery.error.certain: false`: a timeout,
+or an error the network didn't explain) reads `unconfirmed`, because the message may have been
+delivered: check the chat before you send it again. `--wait` goes on asking, since such a failure
+can still turn out sent, or certain; if it stays unconfirmed, `send` exits 5
+(`delivery_unconfirmed`). Still
 queued after 30 seconds exits 0, with the message as it was. Once the message went out it is always
 printed and the exit is 0, even if following it fails (a 401 or 402 on a check, say): that is a
 `delivery_wait_failed` warning on stderr, with the `idempotency_key` that asks the API for its
@@ -200,7 +205,10 @@ When the connection drops, `watch` reconnects by itself (after 3 seconds, then l
 resumes after the last event ID the stream gave it: an event's, or the stream's starting point when
 the API names one. From then on nothing is missed. Before it has one, events that arrive while it
 reconnects can be missed; `--after <evt_id>` pins where it starts. An event can arrive twice, so skip
-IDs you have already handled. The wait between tries keeps growing while connections drop before
+IDs you have already handled. A `message.delivery_failed` the network didn't confirm
+(`error.certain: false`) may have been delivered, and a terminal shows it as unconfirmed; if it later
+turns out certain, a second `message.delivery_failed` for the same message follows, with `certain:
+true`. The wait between tries keeps growing while connections drop before
 delivering any event. An event too large to read (a line over 1 MiB, or over 4 MiB in all) ends the
 connection; if the same one does so twice in a row, `watch` resumes after it and warns
 `event_too_large` with its ID. A resume point older than 4 days starts again from new events, with
@@ -349,7 +357,7 @@ included, on every network but email (add `--network email` for email threads):
   | 2 | usage |
   | 3 | not signed in (no key, a malformed one, or the key was rejected) |
   | 4 | not found (an unknown chat, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
-  | 5 | temporary, retry later: rate limited (a 429: too many requests, a send cap, or too many open event streams), briefly unavailable (a 502, 503 or 504, from the API or a gateway), or a first attempt still running (a 409 `idempotency_in_progress`). `retry_after` says when, if the answer has it |
+  | 5 | not final, come back to it: rate limited (a 429: too many requests, a send cap, or too many open event streams), briefly unavailable (a 502, 503 or 504, from the API or a gateway), a first attempt still running (a 409 `idempotency_in_progress`), or a send the network didn't confirm (`delivery_unconfirmed`: check the chat before you send it again). `retry_after` says when, if the answer has it |
   | 6 | payment required: the account needs an API plan, or a limit of its plan is reached |
 
 - **MCP:** give Claude Code the Chesly MCP server with your key:

@@ -389,6 +389,62 @@ describe('chesly send', () => {
     });
   });
 
+  it('an_unconfirmed_failure_may_have_been_delivered_and_exits_5', async () => {
+    // R96: a failure the network didn't confirm (certain: false) must never read as "failed, resend":
+    // the message may have arrived. Only a certain failure is exit 1 delivery_failed.
+    vi.useFakeTimers();
+    const id = sent('queued').id;
+    const unconfirmed = sent('failed', {
+      delivery: {
+        status: 'failed',
+        error: { code: 'unknown', message: "Chesly couldn't confirm this message.", certain: false },
+        updated_at: '2026-10-28T09:00:01.000Z',
+      },
+    });
+
+    // Without --wait: the send's own answer.
+    serve({ [SEND_PATH]: () => json(201, unconfirmed) });
+    const terminal = captureIo(true);
+    expect(await run(['send', MOM.id, 'On my way'], terminal.io)).toBe(5);
+    expect(terminal.stdout).toBe('Sent to chat_7Hq2mR9xLp4vT1sK8nWz · unconfirmed\n');
+    expect(terminal.stderr).toContain('may have been delivered');
+    expect(terminal.stderr).toContain('Check the chat before you send it again.');
+    expect(terminal.stderr).not.toMatch(/\bfailed\b/);
+
+    serve({ [SEND_PATH]: () => json(201, unconfirmed) });
+    const piped = captureIo();
+    expect(await run(['send', MOM.id, 'On my way'], piped.io)).toBe(5);
+    expect(JSON.parse(piped.stdout)).toEqual(unconfirmed);
+    expect(JSON.parse(piped.stderr)).toMatchObject({ code: 'delivery_unconfirmed', message_id: id, delivery: unconfirmed.delivery });
+
+    // With --wait it keeps asking: an unconfirmed failure can still turn out sent, or certain.
+    const calls = serve({
+      [SEND_PATH]: () => json(201, sent('queued')),
+      [`/v1/messages/${id}`]: inTurn(
+        () => json(200, unconfirmed),
+        () => json(200, unconfirmed),
+        () => json(200, sent('sent')),
+      ),
+    });
+    expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], captureIo().io)).toBe(0);
+    expect(calls.filter((call) => call.method === 'GET')).toHaveLength(3);
+
+    serve({
+      [SEND_PATH]: () => json(201, sent('queued')),
+      [`/v1/messages/${id}`]: inTurn(() => json(200, unconfirmed), () => json(200, sent('failed'))),
+    });
+    const certain = captureIo();
+    expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], certain.io)).toBe(1);
+    expect(JSON.parse(certain.stderr)).toMatchObject({ code: 'delivery_failed' });
+
+    // Still unconfirmed when the 30 s run out: exit 5, never "still queued".
+    serve({ [SEND_PATH]: () => json(201, sent('queued')), [`/v1/messages/${id}`]: () => json(200, unconfirmed) });
+    const late = captureIo(true);
+    expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], late.io)).toBe(5);
+    expect(late.stderr).not.toContain('Still queued');
+    expect(late.stderr).toContain('may have been delivered');
+  });
+
   it('wait_prints_the_message_even_when_following_it_fails', async () => {
     // The message went out: whatever happens while --wait follows it, the answer is printed and the
     // exit is 0. The failure is a warning, with the key that asks the API for the message again.

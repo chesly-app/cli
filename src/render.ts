@@ -4,6 +4,7 @@
  */
 import { formatTable, formatWhen, oneLine, terminalSafe } from './output.js';
 import {
+  deliveryState,
   isMessage,
   isRecord,
   isSendLimit,
@@ -125,11 +126,14 @@ export function messageText(message: Message): string {
   return `${body}${message.truncated ? ' …' : ''}${message.edited ? ' (edited)' : ''}`;
 }
 
-/** `Sent to Mom · queued`: where a message went (its chat's name, else its ID) and how far it got. */
+/**
+ * `Sent to Mom · queued`: where a message went (its chat's name, else its ID) and how far it got. A
+ * failure the network didn't confirm reads `unconfirmed`, never `failed` (R96).
+ */
 export function sentLine(chat: { id: string; name: string | null }, message: Message): string {
   const where = oneLine(chat.name ?? '', 60) || chat.id;
-  const status = message.delivery?.status;
-  return status === undefined ? `Sent to ${where}` : `Sent to ${where} · ${status}`;
+  const state = deliveryState(message.delivery);
+  return state === undefined ? `Sent to ${where}` : `Sent to ${where} · ${state}`;
 }
 
 /**
@@ -161,7 +165,11 @@ function subjectOf(data: Record<string, unknown>, chat: Record<string, unknown>)
     const who = sender.is_me === true ? 'You' : oneLine(textOf(sender.name), 24) || 'Unknown';
     return `${where} — ${who}: ${oneLine(textOf(data.reaction.key), 20)}`;
   }
-  if (isRecord(data.error) && typeof data.error.message === 'string') return `${where}: ${oneLine(data.error.message, 120)}`;
+  if (isRecord(data.error) && typeof data.error.message === 'string') {
+    // A delivery failure the network didn't confirm may have been delivered (R96).
+    const state = data.error.certain === true ? 'failed' : 'unconfirmed, it may have been delivered';
+    return `${where}: ${state}: ${oneLine(data.error.message, 120)}`;
+  }
   if (Array.isArray(data.changes) && data.changes.length > 0) {
     return `${where} (${oneLine(data.changes.map(String).join(', '), 60)})`;
   }

@@ -361,6 +361,38 @@ describe('chesly watch', () => {
     ]);
   });
 
+  it('a_delivery_failure_says_whether_it_is_certain_and_both_of_a_message_print', async () => {
+    // R96: an unconfirmed failure (certain: false) may have been delivered. R98: when it becomes
+    // certain, a second event for the same message follows, and watch prints it too.
+    const failure = (id: string, certain: boolean, message: string) =>
+      event(id, 'message.delivery_failed', {
+        message_id: 'msg_9',
+        chat_id: MOM.id,
+        error: { code: certain ? 'network_rejected' : 'unknown', message, certain },
+      });
+    const unconfirmed = failure('evt_7', false, "Chesly couldn't confirm this message.");
+    const certain = failure('evt_8', true, 'The network refused this message.');
+    serve({ [STREAM]: (call) => sseResponse([frame(unconfirmed), frame(certain)], { end: 'open', signal: call.signal }) });
+
+    const piped = captureIo();
+    const exit = run(['watch'], piped.io);
+    await vi.waitFor(() => expect(lines(piped.stdout)).toHaveLength(2));
+    piped.interrupt();
+    expect(await exit).toBe(0);
+    expect(lines(piped.stdout).map((line) => JSON.parse(line))).toEqual([unconfirmed, certain]);
+
+    serve({ [STREAM]: (call) => sseResponse([frame(unconfirmed), frame(certain)], { end: 'open', signal: call.signal }) });
+    const terminal = captureIo(true);
+    const shown = run(['watch'], terminal.io);
+    await vi.waitFor(() => expect(lines(terminal.stdout)).toHaveLength(2));
+    terminal.interrupt();
+    expect(await shown).toBe(0);
+    expect(lines(terminal.stdout)).toEqual([
+      `09:05 message.delivery_failed ${MOM.id}: unconfirmed, it may have been delivered: Chesly couldn't confirm this message.`,
+      `09:05 message.delivery_failed ${MOM.id}: failed: The network refused this message.`,
+    ]);
+  });
+
   it('sigint_exits_0', async () => {
     const calls = serve({
       [STREAM]: (call) => sseResponse([frame(RECEIVED)], { end: 'open', signal: call.signal }),
