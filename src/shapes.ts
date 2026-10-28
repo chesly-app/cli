@@ -2,6 +2,17 @@
  * The Chesly API's answers (/v1), as the commands read them. JSON mode prints each answer as it
  * came, so these only describe the fields the terminal output and the chat lookup use.
  */
+import { CliError } from './errors.js';
+
+/**
+ * `answer` when `valid` says it is what the request returns, else invalid_response (exit 1), in both
+ * modes: an empty or foreign 2xx (a proxy, a captive portal) never passes for a result. `what` names
+ * the expected answer: "The API's answer is not <what>."
+ */
+export function expectAnswer<T>(answer: unknown, valid: (value: unknown) => value is T, what: string): T {
+  if (!valid(answer)) throw new CliError('invalid_response', `The API's answer is not ${what}.`);
+  return answer;
+}
 
 /** `GET /v1/me`. Fields beyond `key` are rendered generically, so new ones show up without a CLI release. */
 export interface Me {
@@ -112,6 +123,70 @@ export interface ApiEvent {
 
 export function isApiEvent(value: unknown): value is ApiEvent {
   return isRecord(value) && typeof value.id === 'string' && typeof value.type === 'string' && isRecord(value.data);
+}
+
+/** A webhook: where Chesly posts the user's events, signed (Standard Webhooks). */
+export interface Webhook {
+  id: string;
+  url: string;
+  description: string | null;
+  /** Empty: every type. */
+  event_types: string[];
+  /** Empty: every network but email. */
+  networks: string[];
+  payload: 'full' | 'ids';
+  status: 'enabled' | 'disabled';
+  disabled_reason: 'user' | 'failing' | 'gone' | null;
+  failing_since: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function isWebhook(value: unknown): value is Webhook {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.url === 'string';
+}
+
+/** `POST /v1/webhooks`: the webhook and its signing secret, which no later answer shows. */
+export function isCreatedWebhook(value: unknown): value is Webhook & { secret: string } {
+  return isWebhook(value) && typeof (value as { secret?: unknown }).secret === 'string';
+}
+
+export function isWebhookList(value: unknown): value is { webhooks: Webhook[] } {
+  return isRecord(value) && Array.isArray(value.webhooks) && value.webhooks.every(isWebhook);
+}
+
+/** `POST /v1/webhooks/{id}/rotate_secret`. The old secret keeps signing until the expiry. */
+export interface RotatedSecret {
+  secret: string;
+  previous_secret_expires_at: string | null;
+}
+
+export function isRotatedSecret(value: unknown): value is RotatedSecret {
+  return isRecord(value) && typeof value.secret === 'string';
+}
+
+export function isTestDelivery(value: unknown): value is { delivery_id: string } {
+  return isRecord(value) && typeof value.delivery_id === 'string';
+}
+
+/** One attempt history: an event (or a test) posted to a webhook. */
+export interface WebhookDelivery {
+  id: string;
+  event_id: string | null;
+  event_type: string;
+  status: 'pending' | 'succeeded' | 'failed' | 'discarded';
+  attempts: number;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  last_status_code: number | null;
+  last_error: string | null;
+  last_response_excerpt: string | null;
+  created_at: string;
+  delivered_at: string | null;
+}
+
+export function isDeliveryPage(value: unknown): value is { deliveries: WebhookDelivery[]; next_cursor: string | null } {
+  return isRecord(value) && Array.isArray(value.deliveries) && value.deliveries.every((d) => isRecord(d) && typeof d.id === 'string');
 }
 
 /** `POST /v1/media`: the uploaded file, whose `id` a send takes as `media_id`. */

@@ -3,7 +3,17 @@
  * messages) goes through `oneLine` or `terminalSafe` before it is shown. JSON mode never comes here.
  */
 import { formatTable, formatWhen, oneLine, terminalSafe } from './output.js';
-import { isMessage, isRecord, type Account, type ApiEvent, type Chat, type Message, type SearchHit } from './shapes.js';
+import {
+  isMessage,
+  isRecord,
+  type Account,
+  type ApiEvent,
+  type Chat,
+  type Message,
+  type SearchHit,
+  type Webhook,
+  type WebhookDelivery,
+} from './shapes.js';
 
 export function scopeLabel(scope: string | undefined): string {
   if (scope === 'full') return 'full access';
@@ -155,6 +165,58 @@ function subjectOf(data: Record<string, unknown>, chat: Record<string, unknown>)
 
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+/** Webhooks as a table: what each gets (every type, and every network but email, when none is named). */
+export function webhookTable(webhooks: readonly Webhook[]): string {
+  return formatTable([
+    ['ID', 'STATUS', 'EVENTS', 'NETWORKS', 'URL', 'DESCRIPTION'],
+    ...webhooks.map((webhook) => [
+      webhook.id,
+      webhookStatus(webhook),
+      listLabel(webhook.event_types, 'all', 60),
+      listLabel(webhook.networks, 'all but email', 40),
+      oneLine(webhook.url, 80),
+      oneLine(webhook.description ?? '', 40),
+    ]),
+  ]);
+}
+
+/** A new webhook, its settings, and its secret, which the API shows this once. */
+export function createdWebhook(webhook: Webhook & { secret: string }): string {
+  return [
+    `Created ${webhook.id} for ${oneLine(webhook.url, 200)}`,
+    [
+      `Events: ${listLabel(webhook.event_types, 'all', 200)}`,
+      `Networks: ${listLabel(webhook.networks, 'all but email', 200)}`,
+      `Payload: ${oneLine(String(webhook.payload), 10)}`,
+    ].join(' · '),
+    `Secret (shown once): ${oneLine(webhook.secret)}`,
+  ].join('\n');
+}
+
+function webhookStatus(webhook: Webhook): string {
+  const status = oneLine(String(webhook.status), 20);
+  return webhook.status === 'disabled' && webhook.disabled_reason ? `${status} (${oneLine(webhook.disabled_reason, 20)})` : status;
+}
+
+function listLabel(items: unknown, none: string, max: number): string {
+  return Array.isArray(items) && items.length > 0 ? oneLine(items.map(String).join(','), max) : none;
+}
+
+/** A webhook's deliveries, newest first: how each went, by the endpoint's status code or the error. */
+export function deliveryTable(deliveries: readonly WebhookDelivery[]): string {
+  return formatTable([
+    ['ID', 'STATUS', 'EVENT', 'ATTEMPTS', 'RESULT', 'WHEN'],
+    ...deliveries.map((delivery) => [
+      delivery.id,
+      oneLine(String(delivery.status), 12),
+      oneLine(String(delivery.event_type), 40),
+      String(delivery.attempts),
+      delivery.last_status_code === null ? oneLine(delivery.last_error ?? '', 30) : String(delivery.last_status_code),
+      formatWhen(delivery.last_attempt_at ?? delivery.created_at, { time: true }),
+    ]),
+  ]);
 }
 
 /** Oldest first. The API sends newest first, so reversing keeps messages sent in the same instant in order. */
