@@ -12,17 +12,23 @@ export const CHAT_ARGUMENT_HELP = `A <chat> is a chat ID (chat_…) or a name. A
 so does the only partial match. No match, or several, exits 4, and JSON
 mode lists the chats a name could mean as "candidates".`;
 
+/** A chat a command named: its ID, and its name when it was looked up by name. */
+export interface ResolvedChat {
+  id: string;
+  name: string | null;
+}
+
 /**
- * The chat ID for `arg`, a chat ID or a chat's name. `key` gives the API key, only when a name needs it.
+ * The chat `arg` names: a chat ID or a chat's name. `key` gives the API key, only when a name needs it.
  * - A `chat_` ID passes through unchecked: the API answers 404 `chat_not_found` for one that isn't yours.
  * - A name is looked up with `GET /v1/chats?q=<name>&archived=all&limit=10`. One exact match, ignoring
  *   case, wins; so does the only partial match.
  * - No match exits 4 (`chat_not_found`). Several exit 4 (`ambiguous_chat`), with the chats as
  *   `candidates`: the exact matches when there are several, else every match.
  */
-export async function resolveChat(arg: string, key: () => Promise<string>): Promise<string> {
+export async function resolveChat(arg: string, key: () => Promise<string>): Promise<ResolvedChat> {
   const name = arg.trim();
-  if (name.startsWith('chat_')) return name;
+  if (name.startsWith('chat_')) return { id: name, name: null };
   if (name === '') throw new CliError('usage_error', 'Give a chat ID (chat_…) or a chat name.', EXIT.USAGE);
 
   const page = await apiRequest<ChatPage>('/v1/chats', {
@@ -38,7 +44,7 @@ export async function resolveChat(arg: string, key: () => Promise<string>): Prom
       hint: 'Run `chesly chats` to list your chats, or pass a chat ID.',
     });
   }
-  if (others.length === 0) return first.id;
+  if (others.length === 0) return { id: first.id, name: first.name ?? null };
 
   // With more pages, there may be more matches than this page shows.
   const count = `${page.next_cursor ? 'at least ' : ''}${candidates.length}`;

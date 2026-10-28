@@ -34,7 +34,7 @@ Examples:
       const q = query.trim();
       if (q === '') throw new CliError('usage_error', 'Give the words to search for.', EXIT.USAGE);
       const key = keyOnce();
-      const chatId = options.chat === undefined ? undefined : await resolveChat(options.chat, key);
+      const chatId = options.chat === undefined ? undefined : (await resolveChat(options.chat, key)).id;
       const result = await apiRequest<{ messages: SearchHit[] }>('/v1/messages/search', {
         key: await key(),
         query: { q, chat_id: chatId, limit: options.limit },

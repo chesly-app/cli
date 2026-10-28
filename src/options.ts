@@ -19,6 +19,17 @@ export function parseCount(value: string): number {
   return count;
 }
 
+/** The API's Idempotency-Key: 1 to 255 of these characters, which no shell treats specially. */
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,255}$/;
+
+/** `--idempotency-key`: checked here, so a bad key never costs an upload or a request. */
+export function parseIdempotencyKey(value: string): string {
+  if (!IDEMPOTENCY_KEY.test(value)) {
+    throw new InvalidArgumentError('Use 1 to 255 letters, digits, ".", "_", ":" or "-".');
+  }
+  return value;
+}
+
 function wholeNumber(value: string): number | undefined {
   if (!/^[1-9]\d*$/.test(value)) return undefined;
   const number = Number(value);

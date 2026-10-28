@@ -1,5 +1,5 @@
 import pkg from '../package.json' with { type: 'json' };
-import { CliError, EXIT, errorType } from './errors.js';
+import { AnnotatedError, CliError, EXIT, errorType } from './errors.js';
 
 export const VERSION: string = pkg.version;
 const DEFAULT_API_URL = 'https://api.chesly.app';
@@ -139,6 +139,86 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     });
   }
   return parsed as T;
+}
+
+/** The waits before a POST's next attempt after a network error or a 502, 503 or 504: 1 s, then 2 s. */
+const RETRY_DELAYS_MS = [1000, 2000];
+/** A POST gives up at the fifth answer saying its first attempt is still running. */
+const MAX_IN_PROGRESS = 5;
+/** The longest wait a 409's Retry-After gets. */
+const MAX_IN_PROGRESS_WAIT_S = 10;
+
+/**
+ * POSTs `body` with `Idempotency-Key: <idempotencyKey>` and retries with the same key, so the API
+ * acts at most once however often the request goes out:
+ * - after a network error or a 502, 503 or 504: up to 2 more attempts, 1 s and then 2 s later;
+ * - after a 409 `idempotency_in_progress` (the first attempt is still running): again after its
+ *   Retry-After (1 s), until the fifth such answer. Asking again replays the first attempt's answer
+ *   once there is one, or takes over its work.
+ * Giving up without knowing what happened, it adds the key to the error (`idempotency_key`) and says
+ * how to ask again with it.
+ */
+export async function idempotentPost<T>(
+  path: string,
+  init: { key: string; idempotencyKey: string; body?: unknown },
+): Promise<T> {
+  let failures = 0;
+  let inProgress = 0;
+  for (;;) {
+    try {
+      return await apiRequest<T>(path, {
+        method: 'POST',
+        key: init.key,
+        body: init.body,
+        headers: { 'idempotency-key': init.idempotencyKey },
+      });
+    } catch (error) {
+      if (error instanceof CheslyApiError && error.status === 409 && error.code === 'idempotency_in_progress') {
+        if (++inProgress >= MAX_IN_PROGRESS) {
+          throw new AnnotatedError(
+            error,
+            { idempotency_key: init.idempotencyKey },
+            `The first attempt is still running. Run the same command again with --idempotency-key ${init.idempotencyKey} to see its result.`,
+          );
+        }
+        await sleep(Math.min(Math.max(error.retryAfter ?? 1, 1), MAX_IN_PROGRESS_WAIT_S) * 1000);
+        continue;
+      }
+      if (!isTransient(error)) throw error;
+      const delay = RETRY_DELAYS_MS[failures++];
+      if (delay === undefined) {
+        throw new AnnotatedError(
+          error,
+          { idempotency_key: init.idempotencyKey },
+          `It may have gone through. To retry without repeating it, run the same command again with --idempotency-key ${init.idempotencyKey}.`,
+        );
+      }
+      await sleep(delay);
+    }
+  }
+}
+
+/** No answer, or a "try again" from the API or its gateway (502, 503, 504): asking again may work. */
+export function isTransient(error: unknown): error is CheslyNetworkError | CheslyApiError {
+  if (error instanceof CheslyNetworkError) return true;
+  return error instanceof CheslyApiError && (error.status === 502 || error.status === 503 || error.status === 504);
+}
+
+/** Resolves after `ms`, or as soon as `signal` aborts. Its timer and listener go once it resolves. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
 }
 
 /**

@@ -64,6 +64,20 @@ export interface Message {
   edited: boolean;
   deleted: boolean;
   reply_to: string | null;
+  /** How far a message sent through the API got, for 30 days; null for every other message. */
+  delivery?: Delivery | null;
+}
+
+export interface Delivery {
+  status: 'queued' | 'sent' | 'delivered' | 'failed';
+  /** Why it failed: a fixed sentence per `code`, never the network's own words. */
+  error: { code: string; message: string; certain: boolean } | null;
+  updated_at: string;
+}
+
+/** Whether `value` is a message: the answer to a send, or to `GET /v1/messages/{id}`. */
+export function isMessage(value: unknown): value is Message {
+  return isRecord(value) && typeof value.id === 'string' && value.id !== '' && typeof value.chat_id === 'string';
 }
 
 /** `GET /v1/chats/:chat_id/messages`: newest first, and `next_cursor` while there are older ones. */

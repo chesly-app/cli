@@ -110,6 +110,13 @@ export function messageText(message: Message): string {
   return `${body}${message.truncated ? ' …' : ''}${message.edited ? ' (edited)' : ''}`;
 }
 
+/** `Sent to Mom · queued`: where a message went (its chat's name, else its ID) and how far it got. */
+export function sentLine(chat: { id: string; name: string | null }, message: Message): string {
+  const where = oneLine(chat.name ?? '', 60) || chat.id;
+  const status = message.delivery?.status;
+  return status === undefined ? `Sent to ${where}` : `Sent to ${where} · ${status}`;
+}
+
 /** Oldest first. The API sends newest first, so reversing keeps messages sent in the same instant in order. */
 function chronological(messages: readonly Message[]): Message[] {
   return messages.toReversed().sort((a, b) => sentAt(a) - sentAt(b));

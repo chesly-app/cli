@@ -33,6 +33,22 @@ type ProblemExtras = Readonly<Record<string, unknown>> & {
 };
 
 /**
+ * An error with more to say than its own problem: members to add to it (`idempotency_key`) and a
+ * hint for people, such as how to retry a send without repeating it. JSON mode prints the wrapped
+ * error's problem with `extras` added; a terminal prints its message, its own hint, then this one.
+ */
+export class AnnotatedError extends Error {
+  constructor(
+    readonly error: Error,
+    readonly extras: ProblemExtras,
+    readonly hint: string,
+  ) {
+    super(error.message);
+    this.name = 'AnnotatedError';
+  }
+}
+
+/**
  * A failure the CLI finds itself. JSON mode prints it as `{ "type", "title", "code" }` plus its
  * `extras`, with the message as the title. In a terminal, `hint` follows the message. A message never
  * quotes an API key.

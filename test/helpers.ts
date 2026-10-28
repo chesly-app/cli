@@ -49,10 +49,17 @@ export async function openFakeKeychain(): Promise<Keychain | null> {
   };
 }
 
-/** Captures what a run writes to stdout and stderr. `isTTY` is whether stdout is a terminal. */
-export function captureIo(isTTY = false): { io: Io; readonly stdout: string; readonly stderr: string } {
+/**
+ * Captures what a run writes to stdout and stderr. `isTTY` is whether stdout is a terminal; stdin is
+ * a pipe holding `stdin.text` (empty by default), or a terminal with `stdin.isTTY`.
+ */
+export function captureIo(
+  isTTY = false,
+  stdin: { text?: string; isTTY?: boolean } = {},
+): { io: Io; readonly stdout: string; readonly stderr: string; readonly stdinReads: number } {
   let stdout = '';
   let stderr = '';
+  let stdinReads = 0;
   const io: Io = {
     out: (text) => {
       stdout += text;
@@ -61,6 +68,13 @@ export function captureIo(isTTY = false): { io: Io; readonly stdout: string; rea
       stderr += text;
     },
     isTTY,
+    stdin: {
+      isTTY: stdin.isTTY === true,
+      read: async () => {
+        stdinReads++;
+        return stdin.text ?? '';
+      },
+    },
   };
   return {
     io,
@@ -69,6 +83,9 @@ export function captureIo(isTTY = false): { io: Io; readonly stdout: string; rea
     },
     get stderr() {
       return stderr;
+    },
+    get stdinReads() {
+      return stdinReads;
     },
   };
 }

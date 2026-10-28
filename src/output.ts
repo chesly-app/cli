@@ -1,12 +1,14 @@
 import { CommanderError } from 'commander';
 import { CheslyApiError, CheslyNetworkError } from './api.js';
-import { CliError, EXIT, errorType, type ExitCode } from './errors.js';
+import { AnnotatedError, CliError, EXIT, errorType, type ExitCode } from './errors.js';
 
-/** Where a run writes. `isTTY` says whether stdout is a terminal. */
+/** Where a run writes, and the input it may read. `isTTY` says whether stdout is a terminal. */
 export interface Io {
   out: (text: string) => void;
   err: (text: string) => void;
   isTTY: boolean;
+  /** Read only when a command is told to (`-`): reading a terminal would be a prompt. */
+  stdin: { readonly isTTY: boolean; read: () => Promise<string> };
 }
 
 export function processIo(): Io {
@@ -14,6 +16,17 @@ export function processIo(): Io {
     out: (text) => void process.stdout.write(text),
     err: (text) => void process.stderr.write(text),
     isTTY: process.stdout.isTTY === true,
+    stdin: {
+      // A getter: only a command that asks touches process.stdin.
+      get isTTY() {
+        return process.stdin.isTTY === true;
+      },
+      read: async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk as Buffer));
+        return Buffer.concat(chunks).toString('utf8');
+      },
+    },
   };
 }
 
@@ -174,6 +187,14 @@ interface Failure {
 }
 
 function describeFailure(error: unknown): Failure {
+  if (error instanceof AnnotatedError) {
+    const failure = describeFailure(error.error);
+    return {
+      ...failure,
+      problem: { ...failure.problem, ...error.extras },
+      hint: failure.hint === undefined ? error.hint : `${failure.hint}\n${error.hint}`,
+    };
+  }
   if (error instanceof CheslyApiError) {
     return {
       message: error.message,

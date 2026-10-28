@@ -34,7 +34,7 @@ Examples:
     .action(async (chat: string, options: ReadOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const key = keyOnce();
-      const chatId = await resolveChat(chat, key);
+      const { id: chatId } = await resolveChat(chat, key);
       const page = await apiRequest<MessagePage>(`/v1/chats/${encodeURIComponent(chatId)}/messages`, {
         key: await key(),
         query: { limit: options.limit, cursor: options.cursor },
