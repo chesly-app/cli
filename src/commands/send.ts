@@ -8,7 +8,7 @@ import { Output, type Io } from '../output.js';
 import { sentLine } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
 import { isMessage, type Message } from '../shapes.js';
-import { uploadFile } from '../upload.js';
+import { readUpload, uploadFile } from '../upload.js';
 
 interface SendOptions {
   replyTo?: string;
@@ -65,10 +65,12 @@ Examples:
       if (body === undefined && options.file === undefined) {
         throw new CliError('usage_error', 'Give the text to send, - to read it from stdin, or --file.', EXIT.USAGE);
       }
+      // A file that can't be sent fails here, before the chat lookup or any other request.
+      const file = options.file === undefined ? undefined : await readUpload(options.file);
       const key = keyOnce();
       const target = await resolveChat(chat, key, { network: options.network });
       const idempotencyKey = options.idempotencyKey ?? randomUUID();
-      const media = options.file === undefined ? undefined : await uploadFile(options.file, await key());
+      const media = file === undefined ? undefined : await uploadFile(file, await key());
       const answer = await idempotentPost<unknown>(`/v1/chats/${encodeURIComponent(target.id)}/messages`, {
         key: await key(),
         idempotencyKey,

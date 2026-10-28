@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
-import { uploadFile } from '../src/upload.js';
+import { readUpload, uploadFile } from '../src/upload.js';
 import {
   KEY,
   ME,
@@ -501,8 +501,8 @@ describe('uploadFile', () => {
     const answer = { id: 'media_abc', mime_type: 'image/jpeg', size: 4, file_name: 'Beach Day.JPG' };
     const calls = mockFetch(() => json(201, answer));
 
-    expect(await uploadFile(photo, KEY)).toEqual(answer);
-    await uploadFile(odd, KEY);
+    expect(await uploadFile(await readUpload(photo), KEY)).toEqual(answer);
+    await uploadFile(await readUpload(odd), KEY);
 
     expect(calls[0]).toMatchObject({ method: 'POST', url: 'https://api.test/v1/media' });
     expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
@@ -520,9 +520,9 @@ describe('uploadFile', () => {
     writeFileSync(big, '');
     truncateSync(big, 52_428_801);
 
-    await expect(uploadFile(join(env.home, 'nope.png'), KEY)).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
-    await expect(uploadFile(env.home, KEY)).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
-    await expect(uploadFile(big, KEY)).rejects.toMatchObject({ code: 'media_too_large', exitCode: 1 });
+    await expect(readUpload(join(env.home, 'nope.png'))).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
+    await expect(readUpload(env.home)).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
+    await expect(readUpload(big)).rejects.toMatchObject({ code: 'media_too_large', exitCode: 1 });
     expect(calls).toHaveLength(0);
   });
 
@@ -531,6 +531,6 @@ describe('uploadFile', () => {
     writeFileSync(file, 'hi');
     mockFetch(() => json(201, { ok: true }));
 
-    await expect(uploadFile(file, KEY)).rejects.toMatchObject({ code: 'invalid_response' });
+    await expect(uploadFile(await readUpload(file), KEY)).rejects.toMatchObject({ code: 'invalid_response' });
   });
 });

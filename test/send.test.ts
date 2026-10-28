@@ -137,6 +137,17 @@ describe('chesly send', () => {
     expect(sends(calls)[1]?.body).toEqual({ media_id: 'media_aGVsbG8' });
   });
 
+  it('a_missing_file_fails_before_any_request', async () => {
+    const calls = serve({ ...LOOKUP, [SEND_PATH]: () => json(201, sent('queued')) });
+    const cap = captureIo();
+
+    expect(await run(['send', 'Mom', 'Look', '--file', join(env.home, 'no-such-photo.jpg')], cap.io)).toBe(2);
+
+    expect(JSON.parse(cap.stderr)).toMatchObject({ code: 'file_unreadable' });
+    // Not even the chat name's lookup: the command was wrong before it began.
+    expect(calls).toHaveLength(0);
+  });
+
   it('send_retries_with_the_same_key', async () => {
     vi.useFakeTimers();
     const calls = serve({
