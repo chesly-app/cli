@@ -6,6 +6,8 @@ export const EXIT = {
   NOT_SIGNED_IN: 3,
   NOT_FOUND: 4,
   RATE_LIMITED: 5,
+  /** A 402: the account needs an API plan, or its plan's limits are reached. */
+  PAYMENT_REQUIRED: 6,
 } as const;
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];

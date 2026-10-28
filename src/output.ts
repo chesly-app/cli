@@ -200,6 +200,7 @@ function describeFailure(error: unknown): Failure {
 
 function exitCodeForStatus(status: number): ExitCode {
   if (status === 401) return EXIT.NOT_SIGNED_IN;
+  if (status === 402) return EXIT.PAYMENT_REQUIRED;
   if (status === 404) return EXIT.NOT_FOUND;
   if (status === 429) return EXIT.RATE_LIMITED;
   return EXIT.ERROR;

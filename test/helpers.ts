@@ -77,7 +77,12 @@ export interface FetchCall {
   method: string;
   url: string;
   headers: Record<string, string>;
+  /** A JSON body, parsed. */
   body: unknown;
+  /** The body as fetch got it: a FormData for an upload. */
+  rawBody: unknown;
+  /** The request's abort signal: a streamed answer should end when it aborts, as fetch's does. */
+  signal: AbortSignal | undefined;
   /** Date.now() when the request went out (fake time under vi.useFakeTimers). */
   at: number;
 }
@@ -93,6 +98,8 @@ export function mockFetch(handler: (call: FetchCall) => Response | Promise<Respo
         url: String(input),
         headers: Object.fromEntries(new Headers(init?.headers).entries()),
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+        rawBody: init?.body,
+        signal: init?.signal ?? undefined,
         at: Date.now(),
       };
       calls.push(call);
@@ -100,6 +107,42 @@ export function mockFetch(handler: (call: FetchCall) => Response | Promise<Respo
     }),
   );
   return calls;
+}
+
+/**
+ * A `text/event-stream` answer that sends `chunks` one read at a time, then closes, fails like a
+ * dropped connection (`'drop'`), or stays open (`'open'`). Like fetch's, it fails once `signal` aborts.
+ */
+export function sseResponse(
+  chunks: ReadonlyArray<string | Uint8Array>,
+  options: { end?: 'close' | 'drop' | 'open'; signal?: AbortSignal | undefined } = {},
+): Response {
+  const encoder = new TextEncoder();
+  let next = 0;
+  let parked: (() => void) | undefined;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        options.signal?.addEventListener('abort', () => {
+          controller.error(new DOMException('This operation was aborted', 'AbortError'));
+          parked?.();
+        });
+      },
+      pull(controller) {
+        const chunk = chunks[next++];
+        if (chunk !== undefined) {
+          controller.enqueue(typeof chunk === 'string' ? encoder.encode(chunk) : chunk);
+          return undefined;
+        }
+        if (options.end === 'drop') controller.error(new TypeError('terminated'));
+        else if (options.end === 'open') return new Promise<void>((resolve) => (parked = resolve));
+        else controller.close();
+        return undefined;
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
 export function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {

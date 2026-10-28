@@ -83,3 +83,19 @@ export interface CatchUp {
   chats: Array<{ chat: Chat; messages: Message[] }>;
   truncated: boolean;
 }
+
+/** `POST /v1/media`: the uploaded file, whose `id` a send takes as `media_id`. */
+export interface MediaUpload {
+  id: string;
+  mime_type: string;
+  size: number;
+  file_name: string;
+}
+
+export function isMediaUpload(value: unknown): value is MediaUpload {
+  return isRecord(value) && typeof value.id === 'string' && value.id !== '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Never touch the real keychain, even by accident.
 vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./helpers.js')).openFakeKeychain }));
 
+import { mkdtempSync, truncateSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
+import { uploadFile } from '../src/upload.js';
 import {
   KEY,
   ME,
@@ -89,6 +92,24 @@ describe('apiRequest', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('headers_and_form_reach_fetch', async () => {
+    const calls = mockFetch(() => json(201, { id: 'media_1' }));
+    const form = new FormData();
+    form.append('file', new Blob(['hello'], { type: 'text/plain' }), 'note.txt');
+
+    await apiRequest('/v1/media', { key: KEY, form, headers: { 'Idempotency-Key': 'key-1' } });
+    await apiRequest('/v1/chats/chat_1/messages', { key: KEY, body: { text: 'hi' }, headers: { 'Idempotency-Key': 'key-2' } });
+
+    // A form is posted as fetch encodes it (multipart, with its boundary): no JSON content type.
+    expect(calls[0]).toMatchObject({ method: 'POST', url: 'https://api.test/v1/media' });
+    expect(calls[0]?.rawBody).toBe(form);
+    expect(calls[0]?.headers['content-type']).toBeUndefined();
+    expect(calls[0]?.headers['idempotency-key']).toBe('key-1');
+    expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(calls[1]).toMatchObject({ method: 'POST', body: { text: 'hi' } });
+    expect(calls[1]?.headers).toMatchObject({ 'idempotency-key': 'key-2', 'content-type': 'application/json' });
+  });
+
   it('posts_json_and_defaults_to_api_chesly_app', async () => {
     vi.stubEnv('CHESLY_API_URL', '');
     const calls = mockFetch(() => json(200, { ok: true }));
@@ -141,6 +162,20 @@ describe('output and exit codes', () => {
     expect(cap.stdout).toBe('');
     // The API's problem exactly as received: type, title, status, code, request_id.
     expect(JSON.parse(cap.stderr)).toEqual(problemBody(status, code, { request_id: 'req_xyz' }));
+  });
+
+  it('a_402_problem_exits_6', async () => {
+    vi.stubEnv('CHESLY_API_KEY', KEY);
+    const required = problemBody(402, 'api_plan_required', { title: 'An API plan is required.' });
+    mockFetch(() => problem(402, 'api_plan_required', { title: 'An API plan is required.' }));
+
+    const piped = captureIo();
+    expect(await run(['whoami'], piped.io)).toBe(6);
+    expect(JSON.parse(piped.stderr)).toEqual(required);
+
+    const terminal = captureIo(true);
+    expect(await run(['whoami'], terminal.io)).toBe(6);
+    expect(terminal.stderr).toContain('An API plan is required.');
   });
 
   it('a_429_or_503_says_when_to_retry', async () => {
@@ -306,5 +341,49 @@ describe('package.json', () => {
   it('stays_private_until_launch', () => {
     // npm refuses to publish a private package. The `chesly` name is published by hand at launch.
     expect(pkg.private).toBe(true);
+  });
+});
+
+describe('uploadFile', () => {
+  it('posts_the_file_as_multipart_field_file_with_its_name_and_type', async () => {
+    const dir = mkdtempSync(join(env.home, 'files-'));
+    const photo = join(dir, 'Beach Day.JPG');
+    writeFileSync(photo, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+    const odd = join(dir, 'notes.xyz');
+    writeFileSync(odd, 'plain bytes');
+    const answer = { id: 'media_abc', mime_type: 'image/jpeg', size: 4, file_name: 'Beach Day.JPG' };
+    const calls = mockFetch(() => json(201, answer));
+
+    expect(await uploadFile(photo, KEY)).toEqual(answer);
+    await uploadFile(odd, KEY);
+
+    expect(calls[0]).toMatchObject({ method: 'POST', url: 'https://api.test/v1/media' });
+    expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
+    const sent = (calls[0]?.rawBody as FormData).get('file') as File;
+    expect(sent.name).toBe('Beach Day.JPG');
+    expect(sent.type).toBe('image/jpeg');
+    expect(sent.size).toBe(4);
+    // An extension it doesn't know goes as plain bytes; the API files it as a document.
+    expect(((calls[1]?.rawBody as FormData).get('file') as File).type).toBe('application/octet-stream');
+  });
+
+  it('refuses_a_missing_or_too_large_file_before_any_request', async () => {
+    const calls = mockFetch(() => json(201, {}));
+    const big = join(env.home, 'big.mp4');
+    writeFileSync(big, '');
+    truncateSync(big, 52_428_801);
+
+    await expect(uploadFile(join(env.home, 'nope.png'), KEY)).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
+    await expect(uploadFile(env.home, KEY)).rejects.toMatchObject({ code: 'file_unreadable', exitCode: 2 });
+    await expect(uploadFile(big, KEY)).rejects.toMatchObject({ code: 'media_too_large', exitCode: 1 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('an_answer_without_a_media_id_is_invalid_response', async () => {
+    const file = join(env.home, 'a.txt');
+    writeFileSync(file, 'hi');
+    mockFetch(() => json(201, { ok: true }));
+
+    await expect(uploadFile(file, KEY)).rejects.toMatchObject({ code: 'invalid_response' });
   });
 });

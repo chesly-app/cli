@@ -29,17 +29,23 @@ function apiBaseUrl(): string {
   return base;
 }
 
-type QueryValue = string | number | boolean | undefined;
+export type QueryValue = string | number | boolean | undefined;
 
 interface ApiRequestInit {
-  /** Defaults to GET, or POST when there is a body. */
+  /** Defaults to GET, or POST when there is a body or a form. */
   method?: string;
   /** Sent as JSON. */
   body?: unknown;
+  /** Sent as multipart/form-data, as fetch encodes it (an upload). Wins over `body`. */
+  form?: FormData;
   /** Sent as `Authorization: Bearer <key>`. */
   key?: string;
   /** The query string, in this order. Undefined values are left out. */
   query?: Readonly<Record<string, QueryValue>>;
+  /** More request headers, such as `Idempotency-Key`. */
+  headers?: Readonly<Record<string, string>>;
+  /** How long the whole request may take, answer included. 30 s unless set. */
+  timeoutMs?: number;
 }
 
 /**
@@ -88,25 +94,24 @@ export class CheslyApiError extends Error {
 
 /** The request got no HTTP answer: DNS, a refused connection, a dropped connection or a timeout. */
 export class CheslyNetworkError extends Error {
-  constructor(url: string, cause: unknown) {
+  constructor(url: string, cause: unknown, timeoutMs = TIMEOUT_MS) {
     // No `cause` attached: fetch's own errors can quote header values, the key among them.
-    super(`Couldn't reach ${new URL(url).origin}: ${networkReason(cause)}`);
+    super(`Couldn't reach ${new URL(url).origin}: ${networkReason(cause, timeoutMs)}`);
     this.name = 'CheslyNetworkError';
   }
 }
 
 export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
-  if (init.key !== undefined && !isApiKey(init.key)) {
-    throw new CliError('invalid_key_format', 'Refused to send an API key that is not well formed.', EXIT.NOT_SIGNED_IN);
-  }
+  const headers = requestHeaders(init.key, 'application/json', init.headers);
   const url = `${apiBaseUrl()}${path}${queryString(init.query)}`;
-  const headers: Record<string, string> = { accept: 'application/json', 'user-agent': USER_AGENT };
-  if (init.key !== undefined) headers.authorization = `Bearer ${init.key}`;
-  let body: string | undefined;
-  if (init.body !== undefined) {
+  let body: string | FormData | undefined;
+  if (init.form !== undefined) {
+    body = init.form; // fetch sets the multipart content type, with its boundary
+  } else if (init.body !== undefined) {
     headers['content-type'] = 'application/json';
     body = JSON.stringify(init.body);
   }
+  const timeoutMs = init.timeoutMs ?? TIMEOUT_MS;
 
   let response: Response;
   let text: string;
@@ -115,11 +120,11 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
       method: init.method ?? (body === undefined ? 'GET' : 'POST'),
       headers,
       body,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     text = await response.text();
   } catch (cause) {
-    throw new CheslyNetworkError(url, cause);
+    throw new CheslyNetworkError(url, cause, timeoutMs);
   }
 
   const parsed = parseJson(text);
@@ -134,6 +139,80 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     });
   }
   return parsed as T;
+}
+
+/**
+ * Opens `GET <path>` as a Server-Sent Events stream (read it with sse.ts's `readEventStream`), with
+ * `Last-Event-ID` when resuming. Aborting `signal` closes the connection, so pass one per connection.
+ * A refusal (410 `events_expired`, 429 `too_many_streams`…) throws CheslyApiError before any stream;
+ * no answer within 30 s throws CheslyNetworkError. The stream itself has no time limit.
+ */
+export async function openEventStream(
+  path: string,
+  init: { key: string; signal: AbortSignal; lastEventId?: string; query?: Readonly<Record<string, QueryValue>> },
+): Promise<Response> {
+  const headers = requestHeaders(
+    init.key,
+    'text/event-stream',
+    init.lastEventId === undefined ? {} : { 'last-event-id': init.lastEventId },
+  );
+  const url = `${apiBaseUrl()}${path}${queryString(init.query)}`;
+  const connection = new AbortController();
+  const close = () => connection.abort(init.signal.reason);
+  init.signal.addEventListener('abort', close, { once: true });
+  if (init.signal.aborted) close();
+  const timer = setTimeout(
+    () => connection.abort(new DOMException('No answer in time.', 'TimeoutError')),
+    TIMEOUT_MS,
+  );
+  try {
+    let response: Response;
+    try {
+      response = await fetch(url, { headers, signal: connection.signal });
+    } catch (cause) {
+      if (init.signal.aborted) throw cause; // The caller hung up: not a network failure.
+      throw new CheslyNetworkError(url, cause);
+    }
+    const requestId = response.headers.get('x-request-id') ?? undefined;
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw errorFromResponse(response, parseJson(text));
+    }
+    if (mediaTypeOf(response) !== 'text/event-stream') {
+      await response.body?.cancel().catch(() => {});
+      throw new CheslyApiError({
+        status: response.status,
+        code: 'invalid_response',
+        title: 'The API answered with something that is not an event stream.',
+        requestId,
+      });
+    }
+    return response;
+  } catch (error) {
+    init.signal.removeEventListener('abort', close);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The headers of every request: what it accepts, the CLI's user agent, `extra` (names lowercased, so
+ * none is sent twice), and the key. A key is checked before it can be sent, so a malformed one is
+ * never quoted in an error.
+ */
+function requestHeaders(
+  key: string | undefined,
+  accept: string,
+  extra: Readonly<Record<string, string>> = {},
+): Record<string, string> {
+  if (key !== undefined && !isApiKey(key)) {
+    throw new CliError('invalid_key_format', 'Refused to send an API key that is not well formed.', EXIT.NOT_SIGNED_IN);
+  }
+  const headers: Record<string, string> = { accept, 'user-agent': USER_AGENT };
+  for (const [name, value] of Object.entries(extra)) headers[name.toLowerCase()] = value;
+  if (key !== undefined) headers.authorization = `Bearer ${key}`;
+  return headers;
 }
 
 /** `?name=value&…`, percent-encoded (a space is %20), or nothing when every value is undefined. */
@@ -162,8 +241,16 @@ function errorFromResponse(response: Response, body: unknown): CheslyApiError {
 /** Problem details (RFC 9457): sent as application/problem+json, or JSON with a `type` or a `code`. */
 function isProblem(response: Response, fields: Record<string, unknown>): boolean {
   if (Object.keys(fields).length === 0) return false;
-  const mediaType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
-  return mediaType === 'application/problem+json' || typeof fields.type === 'string' || nonEmpty(fields.code) !== undefined;
+  return (
+    mediaTypeOf(response) === 'application/problem+json' ||
+    typeof fields.type === 'string' ||
+    nonEmpty(fields.code) !== undefined
+  );
+}
+
+/** The answer's media type, lowercased, without parameters. */
+function mediaTypeOf(response: Response): string | undefined {
+  return response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
 }
 
 /** Whole seconds from a problem's `retry_after` (seconds) or a Retry-After header (seconds or an HTTP date). */
@@ -197,13 +284,13 @@ function nonEmpty(value: unknown): string | undefined {
  * ENOTFOUND, UND_ERR_CONNECT_TIMEOUT, CERT_HAS_EXPIRED…) are quoted: their messages name the host and
  * the system call. Anything else, such as fetch's TypeError about a header, is never repeated.
  */
-function networkReason(error: unknown): string {
+function networkReason(error: unknown, timeoutMs: number): string {
   let current = error;
   for (let depth = 0; depth < 5 && current instanceof Error && current.cause !== undefined; depth++) {
     current = current.cause;
   }
   if (current instanceof Error && (current.name === 'TimeoutError' || current.name === 'AbortError')) {
-    return `no answer within ${TIMEOUT_MS / 1000} s`;
+    return `no answer within ${timeoutMs / 1000} s`;
   }
   if (current instanceof Error && typeof (current as NodeJS.ErrnoException).code === 'string') return current.message;
   return 'the request failed before it reached the API';
