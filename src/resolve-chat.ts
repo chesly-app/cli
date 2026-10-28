@@ -2,7 +2,7 @@ import { apiRequest } from './api.js';
 import { CliError, EXIT } from './errors.js';
 import { indent } from './output.js';
 import { chatTable } from './render.js';
-import type { ChatPage } from './shapes.js';
+import { expectAnswer, isChatPage } from './shapes.js';
 
 /** How many chats a name lookup asks for. */
 const LOOKUP_LIMIT = 10;
@@ -38,10 +38,11 @@ export async function resolveChat(
   if (name.startsWith('chat_')) return { id: name, name: null };
   if (name === '') throw new CliError('usage_error', 'Give a chat ID (chat_…) or a chat name.', EXIT.USAGE);
 
-  const page = await apiRequest<ChatPage>('/v1/chats', {
+  const answer = await apiRequest<unknown>('/v1/chats', {
     key: await key(),
     query: { q: name, archived: 'all', limit: LOOKUP_LIMIT, network: options.network },
   });
+  const page = expectAnswer(answer, isChatPage, 'a page of chats');
   // An exact match beats every partial one.
   const exact = page.chats.filter((chat) => sameName(chat.name, name));
   const candidates = exact.length > 0 ? exact : page.chats;

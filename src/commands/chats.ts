@@ -4,7 +4,7 @@ import { requireKey } from '../auth.js';
 import { parseLimit, parseNetwork } from '../options.js';
 import { Output, shellQuote, type Io } from '../output.js';
 import { chatTable } from '../render.js';
-import type { ChatPage } from '../shapes.js';
+import { expectAnswer, isChatPage } from '../shapes.js';
 
 interface ChatsOptions {
   unread?: boolean;
@@ -39,7 +39,7 @@ Examples:
     .action(async (options: ChatsOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const { key } = await requireKey();
-      const page = await apiRequest<ChatPage>('/v1/chats', {
+      const answer = await apiRequest<unknown>('/v1/chats', {
         key,
         query: {
           account_id: options.account,
@@ -49,6 +49,7 @@ Examples:
           cursor: options.cursor,
         },
       });
+      const page = expectAnswer(answer, isChatPage, 'a page of chats');
       out.result(page, () => {
         if (page.chats.length > 0) return chatTable(page.chats);
         return options.unread ? 'No unread chats.' : 'No chats.';

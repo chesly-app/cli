@@ -6,7 +6,7 @@ import { parseLimit, parseNetwork } from '../options.js';
 import { Output, type Io } from '../output.js';
 import { searchTable } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
-import type { SearchHit } from '../shapes.js';
+import { expectAnswer, isMessageList, type SearchHit } from '../shapes.js';
 
 interface SearchOptions {
   chat?: string;
@@ -38,10 +38,11 @@ Examples:
       const key = keyOnce();
       const chatId =
         options.chat === undefined ? undefined : (await resolveChat(options.chat, key, { network: options.network })).id;
-      const result = await apiRequest<{ messages: SearchHit[] }>('/v1/messages/search', {
+      const answer = await apiRequest<unknown>('/v1/messages/search', {
         key: await key(),
         query: { q, chat_id: chatId, limit: options.limit, network: options.network },
       });
+      const result = expectAnswer(answer, isMessageList, 'a list of messages') as { messages: SearchHit[] };
       out.result(result, () =>
         result.messages.length === 0 ? `No messages match "${q}".` : searchTable(result.messages),
       );

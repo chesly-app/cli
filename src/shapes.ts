@@ -94,6 +94,10 @@ export interface Account {
   connected_at: string | null;
 }
 
+export function isAccountList(value: unknown): value is { accounts: Account[] } {
+  return isRecord(value) && Array.isArray(value.accounts) && value.accounts.every(hasId);
+}
+
 /** A chat, as `/v1/chats` returns it. */
 export interface Chat {
   id: string;
@@ -114,6 +118,10 @@ export interface Chat {
 export interface ChatPage {
   chats: Chat[];
   next_cursor: string | null;
+}
+
+export function isChatPage(value: unknown): value is ChatPage {
+  return isRecord(value) && Array.isArray(value.chats) && value.chats.every(hasId);
 }
 
 /** A message, as the `/v1` message endpoints return it. `text` is capped at 4,000 characters (`truncated`). */
@@ -151,6 +159,11 @@ export interface MessagePage {
   next_cursor: string | null;
 }
 
+/** A page of messages, or search's answer: `{ messages: [...] }`. */
+export function isMessageList(value: unknown): value is { messages: Message[]; next_cursor?: string | null } {
+  return isRecord(value) && Array.isArray(value.messages) && value.messages.every(isMessage);
+}
+
 /** `GET /v1/messages/search` answers messages with the name and network of the chat each is in. */
 export interface SearchHit extends Message {
   chat_name: string | null;
@@ -161,6 +174,14 @@ export interface SearchHit extends Message {
 export interface CatchUp {
   chats: Array<{ chat: Chat; messages: Message[] }>;
   truncated: boolean;
+}
+
+export function isCatchUp(value: unknown): value is CatchUp {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.chats) &&
+    value.chats.every((entry) => isRecord(entry) && hasId(entry.chat) && Array.isArray(entry.messages))
+  );
 }
 
 /**
@@ -253,6 +274,10 @@ export interface MediaUpload {
 
 export function isMediaUpload(value: unknown): value is MediaUpload {
   return isRecord(value) && typeof value.id === 'string' && value.id !== '';
+}
+
+function hasId(value: unknown): boolean {
+  return isRecord(value) && typeof value.id === 'string';
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

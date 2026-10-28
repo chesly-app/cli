@@ -5,7 +5,7 @@ import { parseLimit, parseNetwork } from '../options.js';
 import { Output, shellQuote, type Io } from '../output.js';
 import { transcript } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
-import type { MessagePage } from '../shapes.js';
+import { expectAnswer, isMessageList } from '../shapes.js';
 
 interface ReadOptions {
   limit?: number;
@@ -38,10 +38,11 @@ Examples:
       const out = new Output(io, command.optsWithGlobals());
       const key = keyOnce();
       const { id: chatId } = await resolveChat(chat, key, { network: options.network });
-      const page = await apiRequest<MessagePage>(`/v1/chats/${encodeURIComponent(chatId)}/messages`, {
+      const answer = await apiRequest<unknown>(`/v1/chats/${encodeURIComponent(chatId)}/messages`, {
         key: await key(),
         query: { limit: options.limit, cursor: options.cursor },
       });
+      const page = expectAnswer(answer, isMessageList, 'a page of messages');
       out.result(page, () => (page.messages.length === 0 ? 'No messages.' : transcript(page.messages)));
       if (!out.json && page.next_cursor) {
         const limit = options.limit === undefined ? '' : ` --limit ${options.limit}`;

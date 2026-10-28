@@ -238,6 +238,33 @@ describe('read commands', () => {
     expect(cap.stderr).toBe('');
   });
 
+  it('an_answer_of_the_wrong_shape_is_invalid_response', async () => {
+    // A proxy or a captive portal can answer 200 with anything: never a crash, never `null` and exit 0.
+    const wrong = [
+      () => new Response('', { status: 200 }),
+      () => json(200, {}),
+      () => json(200, null),
+      () => json(200, []),
+      () => json(200, { chats: 'no', accounts: 'no', messages: 'no' }),
+    ];
+    const commands = [['accounts'], ['chats'], ['read', MOM.id], ['read', 'Mom'], ['search', 'lunch'], ['catchup']];
+    for (const answer of wrong) {
+      for (const args of commands) {
+        mockFetch(answer);
+        const piped = captureIo();
+        expect(await run(args, piped.io), args.join(' ')).toBe(1);
+        expect(piped.stdout, args.join(' ')).toBe('');
+        expect(JSON.parse(piped.stderr), args.join(' ')).toMatchObject({ code: 'invalid_response' });
+
+        mockFetch(answer);
+        const terminal = captureIo(true);
+        expect(await run(args, terminal.io), args.join(' ')).toBe(1);
+        expect(terminal.stderr, args.join(' ')).toMatch(/^Error: The API's answer is not /);
+        expect(terminal.stderr, args.join(' ')).not.toContain('Unexpected error');
+      }
+    }
+  });
+
   it('every_read_command_needs_a_key', async () => {
     const calls = mockFetch(() => json(200, {}));
     vi.stubEnv('CHESLY_API_KEY', '');

@@ -4,7 +4,7 @@ import { requireKey } from '../auth.js';
 import { parseNetwork, upTo } from '../options.js';
 import { Output, indent, oneLine, type Io } from '../output.js';
 import { transcript } from '../render.js';
-import type { CatchUp } from '../shapes.js';
+import { expectAnswer, isCatchUp, type CatchUp } from '../shapes.js';
 
 interface CatchupOptions {
   chats?: number;
@@ -28,10 +28,11 @@ messages are left out and "truncated" is true; chesly read shows a whole chat.`,
     .action(async (options: CatchupOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const { key } = await requireKey();
-      const result = await apiRequest<CatchUp>('/v1/catch_up', {
+      const answer = await apiRequest<unknown>('/v1/catch_up', {
         key,
         query: { chats: options.chats, per_chat: options.perChat, network: options.network },
       });
+      const result = expectAnswer(answer, isCatchUp, 'a catch-up');
       out.result(result, () => digest(result));
       if (!out.json && result.truncated) {
         out.note('Some messages were left out to keep this short. `chesly read <chat>` shows a whole chat.');

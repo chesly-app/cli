@@ -3,7 +3,7 @@ import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
 import { Output, type Io } from '../output.js';
 import { accountTable } from '../render.js';
-import type { Account } from '../shapes.js';
+import { expectAnswer, isAccountList } from '../shapes.js';
 
 export function registerAccounts(program: Command, io: Io): void {
   program
@@ -12,7 +12,7 @@ export function registerAccounts(program: Command, io: Io): void {
     .action(async (_options: unknown, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());
       const { key } = await requireKey();
-      const result = await apiRequest<{ accounts: Account[] }>('/v1/accounts', { key });
+      const result = expectAnswer(await apiRequest<unknown>('/v1/accounts', { key }), isAccountList, 'a list of accounts');
       out.result(result, () =>
         result.accounts.length === 0 ? 'No accounts connected. Connect one in the Chesly app.' : accountTable(result.accounts),
       );
