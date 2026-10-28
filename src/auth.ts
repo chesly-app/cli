@@ -35,6 +35,10 @@ export interface PendingLogin {
   link: string;
   interval: number;
   expiresAt: number;
+  /** The stored keys the sign-in saw when it started: their first 12 and last 4, never the keys. */
+  replaces: Array<{ prefix: string; last4: string }>;
+  /** Whether --force let it replace keys that work. */
+  force: boolean;
 }
 
 export async function savePendingLogin(login: PendingLogin): Promise<void> {
@@ -52,7 +56,11 @@ export async function readPendingLogin(): Promise<PendingLogin | null> {
     const { deviceCode, userCode, link, interval, expiresAt } = value;
     if (typeof deviceCode !== 'string' || typeof userCode !== 'string' || typeof link !== 'string') return null;
     if (typeof interval !== 'number' || typeof expiresAt !== 'number') return null;
-    return { deviceCode, userCode, link, interval, expiresAt };
+    const replaces = (Array.isArray(value.replaces) ? value.replaces : []).flatMap((hint: unknown) => {
+      const { prefix, last4 } = (hint ?? {}) as { prefix?: unknown; last4?: unknown };
+      return typeof prefix === 'string' && typeof last4 === 'string' ? [{ prefix, last4 }] : [];
+    });
+    return { deviceCode, userCode, link, interval, expiresAt, replaces, force: value.force === true };
   } catch {
     return null;
   }

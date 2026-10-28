@@ -58,6 +58,18 @@ async function deleteKey(
   }
 }
 
+/** Whether `key` still works (`GET /v1/me`), without revoking it: gone when refused (401), else active. */
+export async function checkKey(key: string): Promise<Revocation> {
+  const { prefix, last4 } = keyHint(key);
+  try {
+    const me = await apiRequest<unknown>('/v1/me', { key, timeoutMs: REVOKE_TIMEOUT_MS });
+    return { id: isMe(me) ? me.key.id : null, prefix, last4, outcome: 'active' };
+  } catch (error) {
+    const refused = error instanceof CheslyApiError && error.status === 401;
+    return { id: null, prefix, last4, outcome: refused ? 'gone' : 'active' };
+  }
+}
+
 /** "This key (ck_live_AbCd…WxYz, id …) is still active; revoke it in the dashboard at web.chesly.app/api/keys." */
 export function stillActiveMessage(revocation: Revocation, which = 'This key'): string {
   const id = revocation.id === null ? '' : `, id ${revocation.id}`;

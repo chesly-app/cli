@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -243,6 +244,97 @@ describe('chesly login', () => {
     expect(await runToEnd(['login', '--wait'], captureIo().io)).toBe(0);
     expect(keychain.value).toBe(KEY);
     expect(calls.filter((call) => call.method === 'DELETE').map((call) => call.url)).toEqual(['https://api.test/v1/keys/key_old']);
+  });
+
+  it('a_new_sign_in_retires_only_what_the_store_let_go_of', async () => {
+    vi.useFakeTimers();
+    const DEAD = keyFor('dead');
+    const FILE = keyFor('file');
+    const OTHER = keyFor('other');
+    const ids: Record<string, string> = { [KEY]: 'key_1', [FILE]: 'key_file', [OTHER]: 'key_other' };
+    const serveKeys = () =>
+      mockFetch((call) => {
+        if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+        if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+        if (call.method === 'DELETE') return new Response(null, { status: 204 });
+        const key = (call.headers.authorization ?? '').replace('Bearer ', '');
+        const id = ids[key];
+        return id === undefined ? problem(401, 'invalid_api_key') : json(200, { ...ME, key: { ...ME.key, id } });
+      });
+    const warnings = (stderr: string) =>
+      stderr
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((line) => line.warning === 'key_still_active');
+
+    // Without --force, only the key the sign-in checked (and found not working) may go. The working
+    // key in the file was replaced unchecked: it is named, never revoked.
+    keychain.value = DEAD;
+    writeCredentials(env.home, FILE);
+    let calls = serveKeys();
+    const plain = captureIo();
+    expect(await runToEnd(['login', '--no-browser'], plain.io)).toBe(0);
+    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(0);
+    expect(warnings(plain.stderr)).toEqual([expect.objectContaining({ id: 'key_file', prefix: FILE.slice(0, 12) })]);
+
+    // With --force, every key the person had may go: the file's is revoked, by itself.
+    keychain.value = DEAD;
+    writeCredentials(env.home, FILE);
+    calls = serveKeys();
+    const forced = captureIo();
+    expect(await runToEnd(['login', '--force', '--no-browser'], forced.io)).toBe(0);
+    expect(calls.filter((call) => call.method === 'DELETE').map((call) => [call.url, call.headers.authorization])).toEqual([
+      ['https://api.test/v1/keys/key_file', `Bearer ${FILE}`],
+    ]);
+    expect(warnings(forced.stderr)).toEqual([]);
+
+    // A key the store kept (here the file couldn't be removed) isn't let go of: never revoked, named.
+    if (process.platform !== 'win32') {
+      keychain.value = OTHER;
+      writeCredentials(env.home, FILE);
+      const dir = join(env.home, '.config', 'chesly');
+      chmodSync(dir, 0o500);
+      try {
+        calls = serveKeys();
+        const kept = captureIo();
+        expect(await runToEnd(['login', '--force', '--no-browser'], kept.io)).toBe(0);
+        expect(calls.filter((call) => call.method === 'DELETE').map((call) => call.url)).toEqual(['https://api.test/v1/keys/key_other']);
+        expect(warnings(kept.stderr)).toEqual([expect.objectContaining({ id: 'key_file' })]);
+      } finally {
+        chmodSync(dir, 0o700);
+      }
+    }
+  });
+
+  it('wait_revokes_only_what_no_wait_saw', async () => {
+    vi.useFakeTimers();
+    const OLD = keyFor('old');
+    const OTHER = keyFor('other');
+    const ids: Record<string, string> = { [KEY]: 'key_1', [OLD]: 'key_old', [OTHER]: 'key_other' };
+    const calls = mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) return json(200, SESSION);
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      if (call.method === 'DELETE') return new Response(null, { status: 204 });
+      const id = ids[(call.headers.authorization ?? '').replace('Bearer ', '')];
+      return id === undefined ? problem(401, 'invalid_api_key') : json(200, { ...ME, key: { ...ME.key, id } });
+    });
+
+    keychain.value = OLD;
+    expect(await run(['login', '--no-wait', '--force', '--no-browser'], captureIo().io)).toBe(0);
+    // What --no-wait saw, never the key itself.
+    const pending = JSON.parse(readFileSync(pendingLoginFile(env.home), 'utf8'));
+    expect(pending).toMatchObject({ force: true, replaces: [{ prefix: OLD.slice(0, 12), last4: OLD.slice(-4) }] });
+    expect(JSON.stringify(pending)).not.toContain(OLD);
+
+    // Another key was stored in between: --wait replaces it, but it isn't what --no-wait saw.
+    keychain.value = OTHER;
+    const cap = captureIo();
+    expect(await runToEnd(['login', '--wait'], cap.io)).toBe(0);
+    expect(keychain.value).toBe(KEY);
+    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(0);
+    expect(cap.stderr).toContain('"warning":"key_still_active"');
+    expect(cap.stderr).toContain('"id":"key_other"');
   });
 
   it('login_with_a_rejected_stored_key_signs_in_again', async () => {

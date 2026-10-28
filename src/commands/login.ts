@@ -5,6 +5,7 @@ import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey, isLoopbackHos
 import {
   deletePendingLogin,
   describeSource,
+  keyHint,
   readPendingLogin,
   savePendingLogin,
   storeKey,
@@ -16,7 +17,12 @@ import { CliError, EXIT } from '../errors.js';
 import { Output, oneLine, terminalSafe, type Io } from '../output.js';
 import { scopeLabel } from '../render.js';
 import { isMe, type Me } from '../shapes.js';
-import { revokeKey, stillActiveMessage } from './keys.js';
+import { checkKey, revokeKey, stillActiveMessage } from './keys.js';
+
+/** A sign-in in progress: what polling needs. A pending one (--no-wait) also says what it replaces. */
+type SignIn = Omit<PendingLogin, 'replaces' | 'force'>;
+type StoredKeys = Awaited<ReturnType<typeof storedKeys>>;
+type KeyHintPair = PendingLogin['replaces'][number];
 
 interface LoginOptions {
   key?: string;
@@ -41,8 +47,9 @@ export function registerLogin(program: Command, io: Io): void {
       `
 When the key it stored still works, chesly login says "Already signed in"
 and stops: each sign-in makes a key, and an account has 25 at most. --force
-signs in anyway, and revokes the key the new one replaces (or names it, if
-it can't); chesly logout revokes the stored key.
+signs in anyway, and revokes the stored keys the new one replaces (any other
+replaced key that still works is named in a key_still_active warning);
+chesly logout revokes the stored key.
 
 Without --key, chesly login prints a link and a code, opens your browser
 (wherever there is one to show: not over SSH, not in CI, not with
@@ -85,10 +92,12 @@ Examples:
         return;
       }
       const stored = await storedKeys();
-      if (options.force !== true && (await alreadySignedIn(out, stored))) return;
+      const force = options.force === true;
+      if (!force && (await alreadySignedIn(out, stored))) return;
       const signIn = await startSignIn();
+      const seen = stored.keys.map(({ key }) => keyHint(key));
       if (options.wait === false) {
-        await savePendingLogin(signIn);
+        await savePendingLogin({ ...signIn, replaces: seen, force });
         const opened = options.browser !== false && openBrowser(signIn.link);
         showPending(out, signIn, opened);
         return;
@@ -98,7 +107,7 @@ Examples:
       out.note(`${opened ? 'Opened your browser. ' : ''}Waiting for approval… (Ctrl+C to cancel)`);
       const key = await pollForKey(signIn);
       await keepKey(out, key);
-      await retireReplacedKey(out, stored.keys[0]?.key, key);
+      await retireReplacedKeys(out, stored.keys, key, mayReplace(seen, force));
     });
 }
 
@@ -138,7 +147,7 @@ async function loginWithKey(out: Output, key: string): Promise<void> {
  * keychain that fails or never answers may hold a working key, so without one elsewhere that works,
  * its failure stops the sign-in rather than minting another key.
  */
-async function alreadySignedIn(out: Output, { keys, keychainFailure }: Awaited<ReturnType<typeof storedKeys>>): Promise<boolean> {
+async function alreadySignedIn(out: Output, { keys, keychainFailure }: StoredKeys): Promise<boolean> {
   const [stored] = keys;
   const me = stored === undefined ? undefined : await detailsOf(stored.key);
   if (stored === undefined || me === undefined) {
@@ -182,24 +191,42 @@ async function finishPendingSignIn(out: Output): Promise<void> {
   } finally {
     await deletePendingLogin();
   }
-  const replaced = (await storedKeys()).keys[0]?.key;
+  const before = (await storedKeys()).keys;
   await keepKey(out, key);
-  await retireReplacedKey(out, replaced, key);
+  // Only what --no-wait saw may go, not a key stored since.
+  await retireReplacedKeys(out, before, key, mayReplace(pending.replaces, pending.force));
 }
 
 /**
- * Revokes the stored key a new sign-in just replaced, by that key itself (the new key only when the
- * old one is read-only): unrevoked, it would stay active and count toward the 25. Best effort: when it
- * can't be revoked, a key_still_active warning names it (ID, first 12 and last 4) for the dashboard.
+ * The stored keys a new sign-in may revoke once it replaces them: with --force, every one it saw (the
+ * person asked); without, only the first, which it checked and found not working.
  */
-async function retireReplacedKey(out: Output, replaced: string | undefined, key: string): Promise<void> {
-  if (replaced === undefined || replaced === key) return;
-  const revocation = await revokeKey(replaced, key);
-  if (revocation.outcome === 'revoked') {
-    out.note(`Revoked the key this one replaced${revocation.id === null ? '' : ` (id ${revocation.id})`}.`);
-  } else if (revocation.outcome === 'active') {
-    const { id, prefix, last4 } = revocation;
-    out.warn('key_still_active', stillActiveMessage(revocation, 'The key this replaced'), { id, prefix, last4 });
+function mayReplace(seen: KeyHintPair[], force: boolean): KeyHintPair[] {
+  return force ? seen : seen.slice(0, 1);
+}
+
+/**
+ * After a new key is stored, the keys the stores held `before` and let go of were replaced:
+ * unrevoked, they would stay active and count toward the 25. One the sign-in may replace (`allowed`)
+ * is revoked, by itself (the new key only when it is read-only). Any other, and any a store kept (it
+ * couldn't remove it, or the keychain didn't answer), is only checked, and named in a key_still_active
+ * warning (ID, first 12 and last 4) while it works, as is one that couldn't be revoked.
+ */
+async function retireReplacedKeys(out: Output, before: StoredKeys['keys'], key: string, allowed: KeyHintPair[]): Promise<void> {
+  const after = await storedKeys();
+  const kept = new Set(after.keys.map((stored) => stored.key));
+  for (const old of before) {
+    if (old.key === key) continue;
+    const letGo = !kept.has(old.key) && !(old.source === 'keychain' && after.keychainFailure !== undefined);
+    const hint = keyHint(old.key);
+    const mayRevoke = letGo && allowed.some((pair) => pair.prefix === hint.prefix && pair.last4 === hint.last4);
+    const result = mayRevoke ? await revokeKey(old.key, key) : await checkKey(old.key);
+    if (result.outcome === 'revoked') {
+      out.note(`Revoked the key this one replaced${result.id === null ? '' : ` (id ${result.id})`}.`);
+    } else if (result.outcome === 'active') {
+      const { id, prefix, last4 } = result;
+      out.warn('key_still_active', stillActiveMessage(result, 'The key this replaced'), { id, prefix, last4 });
+    }
   }
 }
 
@@ -236,18 +263,18 @@ function checkCouldNotRun(error: unknown): error is CheslyNetworkError | CheslyA
 const MAX_BACKOFF_SECONDS = 30;
 
 /** Starts a device-flow sign-in (RFC 8628 §3.2): `POST /v1/cli/sessions`, checked before anything is shown. */
-async function startSignIn(): Promise<PendingLogin> {
+async function startSignIn(): Promise<SignIn> {
   const answer = await apiRequest<unknown>('/v1/cli/sessions', { method: 'POST', body: { client_name: hostname() } });
   return checkSession(answer);
 }
 
 /** Seconds until the code expires, for people and agents. */
-function expiresIn(signIn: PendingLogin): number {
+function expiresIn(signIn: SignIn): number {
   return Math.max(0, Math.round((signIn.expiresAt - Date.now()) / 1000));
 }
 
 /** The link and the code, while chesly login waits. JSON mode: one line an agent can parse, on stderr. */
-function showLink(out: Output, signIn: PendingLogin): void {
+function showLink(out: Output, signIn: SignIn): void {
   out.notice(
     { verification_uri_complete: signIn.link, user_code: signIn.userCode, expires_in: expiresIn(signIn) },
     () =>
@@ -257,7 +284,7 @@ function showLink(out: Output, signIn: PendingLogin): void {
 }
 
 /** --no-wait's result: the link and the code, and what to run next. */
-function showPending(out: Output, signIn: PendingLogin, opened: boolean): void {
+function showPending(out: Output, signIn: SignIn, opened: boolean): void {
   out.result(
     {
       status: 'pending',
@@ -276,7 +303,7 @@ function showPending(out: Output, signIn: PendingLogin, opened: boolean): void {
  * Polls until the code is approved, denied or expired (RFC 8628 §3.4-3.5), and returns the key. A
  * network error or a 5xx doubles the wait (up to 30 s), and no wait runs past the expiry.
  */
-async function pollForKey(signIn: PendingLogin): Promise<string> {
+async function pollForKey(signIn: SignIn): Promise<string> {
   let interval = signIn.interval;
   const { expiresAt } = signIn;
   for (;;) {
@@ -329,7 +356,7 @@ function slowerAfterFailure(interval: number): number {
 }
 
 /** The answer to `POST /v1/cli/sessions`, checked: `link` always carries the code. */
-function checkSession(answer: unknown): PendingLogin {
+function checkSession(answer: unknown): SignIn {
   const fields = (typeof answer === 'object' && answer !== null ? answer : {}) as Record<string, unknown>;
   const { device_code: deviceCode, user_code: userCode } = fields;
   if (typeof deviceCode !== 'string' || deviceCode === '' || typeof userCode !== 'string' || userCode === '') {
