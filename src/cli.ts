@@ -50,7 +50,9 @@ Exit codes:
 
 Examples:
   chesly catchup                       your unread chats and their latest messages
-  chesly send "Mom" "On my way" --wait
+  chesly send "Mom" - --wait <<'EOF'   the text on stdin, exactly as written
+  On my way
+  EOF
   chesly watch --json                  live events, one JSON object a line
   chesly chats --network email         your email threads
 

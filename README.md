@@ -115,20 +115,35 @@ an email thread's name is its subject. The names are `whatsapp`, `telegram`, `si
 chesly chats --network email                      # your email threads
 chesly catchup --network email                    # unread email, with the latest messages
 chesly read "Invoice 42" --network email          # an email thread, by its subject
-chesly send "Invoice 42" "Paid, thank you." --network email
 chesly search "boarding pass" --network whatsapp  # one network only
+chesly send "Invoice 42" - --network email <<'EOF'  # a reply to that thread
+Paid, thank you.
+EOF
 ```
 
 ## Send messages
 
 ```sh
-chesly send "Mom" "On my way"                        # text
-chesly send "Mom" "On my way" --wait                 # wait until the network has it
-echo "Running late" | chesly send "Mom" -            # the text from stdin
-chesly send "Mom" "Yes" --reply-to msg_...           # a reply
-chesly send "Mom" "The plan" --file plan.pdf         # a file (at most 50 MB), the text its caption
-chesly send "Mom" "The plan" --media-id media_...    # a file uploaded before (a retry of a file send)
+chesly send "Mom" - <<'EOF'                              # the text, from stdin
+On my way
+EOF
+chesly send "Mom" - --wait <<'EOF'                       # wait until the network has it
+On my way
+EOF
+chesly send "Mom" - --reply-to msg_... <<'EOF'           # a reply
+Yes
+EOF
+chesly send "Mom" - --file plan.pdf <<'EOF'              # a file (at most 50 MB), the text its caption
+The plan
+EOF
+chesly send "Mom" - --media-id media_... <<'EOF'         # a file uploaded before (a retry of a file send)
+The plan
+EOF
 ```
+
+Pass the text on stdin with a quoted heredoc (`- <<'EOF'`), never as a double-quoted argument:
+inside double quotes the shell still expands `$` and backticks, so "It costs $5" would arrive as
+"It costs ", while the quotes around `EOF` keep the text exactly as written.
 
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
 takes it; `--wait` checks every second, within 30 seconds in all, until it is `sent`, `delivered`

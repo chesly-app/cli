@@ -69,12 +69,20 @@ sending twice, pass the same --idempotency-key again. A file send that gives
 up also names its upload: retry it with --media-id <id> instead of --file, as
 a new upload would make another media ID, which the same key refuses (422).
 
-Text that starts with - goes after --:  chesly send Mom -- "-5 degrees here"
+Pass the text on stdin with a quoted heredoc (- <<'EOF'), not as a
+double-quoted argument: inside double quotes the shell still expands $ and
+backticks, while the quoted EOF keeps the text exactly as written.
 
 Examples:
-  chesly send "Mom" "On my way" --wait
-  chesly send "Invoice 42" "Paid, thank you." --network email
-  echo "The report is attached" | chesly send chat_7Hq2mR9xLp4vT1sK8nWz - --file report.pdf`,
+  chesly send "Mom" - --wait <<'EOF'
+  On my way
+  EOF
+  chesly send "Invoice 42" - --network email <<'EOF'
+  Paid, thank you.
+  EOF
+  chesly send chat_7Hq2mR9xLp4vT1sK8nWz - --file report.pdf <<'EOF'
+  The report is attached.
+  EOF`,
     )
     .action(async (chat: string, text: string | undefined, options: SendOptions, command: Command) => {
       const out = new Output(io, command.optsWithGlobals());

@@ -605,6 +605,31 @@ describe('cli errors', () => {
     for (const { code, title } of LOCAL_WARNING_CODES) expect(title, code).toMatch(/^[A-Z].*\.$/);
   });
 
+  it('every_send_example_passes_its_text_through_a_quoted_heredoc', async () => {
+    // Inside double quotes the shell still rewrites $ and backticks; a quoted heredoc keeps the text.
+    const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
+    const sendHelp = captureIo();
+    await run(['send', '--help'], sendHelp.io);
+    const rootHelp = captureIo();
+    await run(['--help'], rootHelp.io);
+    for (const [where, text] of [
+      ['README', readme],
+      ['send --help', sendHelp.stdout],
+      ['--help', rootHelp.stdout],
+    ] as const) {
+      const examples = text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => /^(\S.*\| *)?chesly send /.test(line));
+      expect(examples.length, where).toBeGreaterThan(0);
+      for (const example of examples) {
+        expect(example, where).toMatch(/ - .*<<'EOF'/);
+        expect(example, where).not.toMatch(/^chesly send \S+ "[^"]*"/);
+      }
+    }
+    expect(readme).toMatch(/quoted heredoc/);
+  });
+
   it('every_command_says_what_it_prints_with_an_example', async () => {
     const commands = [
       ['login'], ['logout'], ['whoami'], ['key'], ['accounts'], ['chats'], ['read'], ['search'], ['catchup'],
