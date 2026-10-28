@@ -185,8 +185,10 @@ export function reportError(error: unknown, io: Io, json: boolean): ExitCode {
   if (json) {
     io.err(`${toJson(failure.problem)}\n`);
   } else {
-    const requestId = failure.requestId === undefined ? '' : ` (request ${failure.requestId})`;
-    io.err(`Error: ${failure.message}${requestId}\n${failure.hint ? `${failure.hint}\n` : ''}`);
+    // The API's words (a detail, a request ID) are cleaned like any text from elsewhere.
+    const requestId = failure.requestId === undefined ? '' : ` (request ${oneLine(failure.requestId, 64)})`;
+    const hint = failure.hint ? `${terminalSafe(failure.hint)}\n` : '';
+    io.err(`Error: ${terminalSafe(failure.message)}${requestId}\n${hint}`);
   }
   return failure.exitCode;
 }

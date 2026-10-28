@@ -206,6 +206,46 @@ describe('chesly login', () => {
     expect(terminal.stderr).toContain('Approve it if the page shows the code BCDF-GHJK.');
   });
 
+  it('server_text_never_reaches_the_terminal_raw', async () => {
+    // The key's name comes from client_name, which whoever starts a sign-in sets; the link and the
+    // code come from the API. Escape sequences go, and the name is cut to 100 characters.
+    vi.useFakeTimers();
+    const hostileName = `Chesly CLI on \u001b]0;owned\u0007box\u202e ${'x'.repeat(200)}`;
+    const hostileMe = { ...ME, key: { ...ME.key, name: hostileName } };
+    mockFetch((call) => {
+      if (call.url.endsWith('/v1/cli/sessions')) {
+        return json(200, {
+          ...SESSION,
+          user_code: 'BCDF\u001b[2J-GHJK',
+          verification_uri_complete: 'https://web.chesly.app/cli?code=BCDF-GHJK\u001b]52;c;ZXZpbA==\u0007',
+        });
+      }
+      if (call.url.endsWith('/v1/cli/sessions/token')) return json(200, { api_key: KEY, token_type: 'Bearer' });
+      return json(200, hostileMe);
+    });
+    const controls = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
+
+    const login = captureIo(true);
+    const exit = run(['login'], login.io);
+    await vi.runAllTimersAsync();
+    expect(await exit).toBe(0);
+    expect(login.stdout + login.stderr).not.toMatch(controls);
+    expect(login.stdout).toMatch(/^Signed in with the key "Chesly CLI on \]0;ownedbox x+…" \(full access\)\.$/m);
+    expect(login.stdout.split('"')[1]).toHaveLength(100);
+
+    keychain.value = KEY;
+    const whoami = captureIo(true);
+    expect(await run(['whoami'], whoami.io)).toBe(0);
+    expect(whoami.stdout).not.toMatch(controls);
+
+    // API error text shown in a terminal is cleaned the same way.
+    mockFetch(() => problem(400, 'text_too_long', { detail: 'Too long \u001b[2J\u009b1m for this network.' }));
+    const failed = captureIo(true);
+    expect(await run(['whoami'], failed.io)).toBe(1);
+    expect(failed.stderr).toContain('Too long [2J1m for this network.');
+    expect(failed.stderr).not.toMatch(controls);
+  });
+
   it('device_login_stops_when_access_is_denied', async () => {
     vi.useFakeTimers();
     mockFetch((call) => {

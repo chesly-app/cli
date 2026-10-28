@@ -4,7 +4,7 @@ import type { Command } from 'commander';
 import { CheslyApiError, CheslyNetworkError, apiRequest, isApiKey } from '../api.js';
 import { describeSource, storeKey, type KeyStore } from '../auth.js';
 import { CliError, EXIT } from '../errors.js';
-import { Output, type Io } from '../output.js';
+import { Output, oneLine, terminalSafe, type Io } from '../output.js';
 import { scopeLabel } from '../render.js';
 import { isMe, type Me } from '../shapes.js';
 
@@ -98,7 +98,9 @@ async function approveInBrowser(out: Output): Promise<string> {
   // JSON mode: one line an agent can parse, to show the link and the code to its person.
   out.notice(
     { verification_uri_complete: session.link, user_code: session.userCode, expires_in: session.expiresIn },
-    () => `To sign in, open this link:\n\n  ${session.link}\n\nApprove it if the page shows the code ${session.userCode}.`,
+    () =>
+      `To sign in, open this link:\n\n  ${terminalSafe(session.link)}\n\n` +
+      `Approve it if the page shows the code ${terminalSafe(session.userCode)}.`,
   );
   const opened = out.io.isTTY && openBrowser(session.link);
   if (!out.json) {
@@ -175,7 +177,9 @@ function approvalLink(complete: unknown, page: unknown, userCode: string): strin
 function signedIn(out: Output, store: KeyStore, me: Me): void {
   out.result(
     me,
-    () => `Signed in with the key "${me.key?.name}" (${scopeLabel(me.key?.scope)}).\nSaved it in ${describeSource(store)}.`,
+    () =>
+      `Signed in with the key "${oneLine(me.key?.name ?? '', 100)}" (${scopeLabel(me.key?.scope)}).\n` +
+      `Saved it in ${describeSource(store)}.`,
   );
   noteEnvKey(out);
 }

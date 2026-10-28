@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { describeSource, maskKey, requireKey, type KeySource } from '../auth.js';
 import { CliError } from '../errors.js';
-import { Output, formatTable, type Io } from '../output.js';
+import { Output, formatTable, oneLine, type Io } from '../output.js';
 import { scopeLabel } from '../render.js';
 import { isMe, type Me } from '../shapes.js';
 
@@ -21,9 +21,9 @@ export function registerWhoami(program: Command, io: Io): void {
 
 function describeMe(me: Me, key: string, source: KeySource): string {
   return formatTable([
-    ['Key', `${me.key?.name ?? ''} (${me.key?.id ?? ''})`],
+    ['Key', `${oneLine(me.key?.name ?? '', 100)} (${oneLine(String(me.key?.id ?? ''), 40)})`],
     ['Scope', scopeLabel(me.key?.scope)],
-    ['API version', String(me.key?.api_version ?? '')],
+    ['API version', oneLine(String(me.key?.api_version ?? ''), 20)],
     ...fieldRows(me.limits),
     ...fieldRows(me.usage),
     ['Using', `${maskKey(key)} from ${describeSource(source)}`],
@@ -32,7 +32,7 @@ function describeMe(me: Me, key: string, source: KeySource): string {
 
 function fieldRows(fields: Record<string, unknown> | undefined): string[][] {
   return Object.entries(fields ?? {}).map(([name, value]) => [
-    name.charAt(0).toUpperCase() + name.slice(1).replaceAll('_', ' '),
-    typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value),
+    oneLine(name.charAt(0).toUpperCase() + name.slice(1).replaceAll('_', ' '), 40),
+    oneLine(typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value), 100),
   ]);
 }
