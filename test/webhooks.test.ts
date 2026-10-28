@@ -228,6 +228,27 @@ describe('chesly webhooks', () => {
     expect(piped.stderr).toBe('');
   });
 
+  it('server_text_in_results_and_notes_is_cleaned_for_the_terminal', async () => {
+    // Secrets, delivery IDs and cursors come from the API too: none reaches the terminal raw.
+    const controls = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
+    serve({
+      [`/v1/webhooks/${ORDERS.id}/rotate_secret`]: () =>
+        json(200, { secret: `${NEW_SECRET}\u001b]0;owned\u0007`, previous_secret_expires_at: '2026-10-29T09:00:00.000Z' }),
+      [`/v1/webhooks/${ORDERS.id}/test`]: () => json(202, { delivery_id: 'dlv_\u001b[31m7sKq' }),
+      [`/v1/webhooks/${ORDERS.id}/deliveries`]: () => json(200, { deliveries: [delivery('dlv_1')], next_cursor: 'cur\u001b[2J\u202eold' }),
+    });
+
+    for (const args of [
+      ['webhooks', 'rotate', ORDERS.id],
+      ['webhooks', 'test', ORDERS.id],
+      ['webhooks', 'deliveries', ORDERS.id],
+    ]) {
+      const terminal = captureIo(true);
+      expect(await run(args, terminal.io), args.join(' ')).toBe(0);
+      expect(terminal.stdout + terminal.stderr, args.join(' ')).not.toMatch(controls);
+    }
+  });
+
   it('deliveries_pass_status_and_cursor', async () => {
     const page = {
       deliveries: [

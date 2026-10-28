@@ -3,7 +3,7 @@ import { Option, type Command } from 'commander';
 import { apiRequest, idempotentPost } from '../api.js';
 import { requireKey } from '../auth.js';
 import { parseIdempotencyKey, parseLimit, parseList } from '../options.js';
-import { Output, formatWhen, shellQuote, type Io } from '../output.js';
+import { Output, formatWhen, oneLine, shellQuote, type Io } from '../output.js';
 import { createdWebhook, deliveryTable, webhookTable } from '../render.js';
 import {
   expectAnswer,
@@ -144,7 +144,7 @@ Example:
       out.result(rotated, () => {
         const until = formatWhen(rotated.previous_secret_expires_at, { time: true });
         const old = until === '' ? 'The old secret no longer signs.' : `The old secret keeps working until ${until}.`;
-        return `Secret (shown once): ${rotated.secret}\n${old}`;
+        return `Secret (shown once): ${oneLine(rotated.secret)}\n${old}`;
       });
     });
 
@@ -165,7 +165,7 @@ Example:
         idempotencyKey: options.idempotencyKey ?? randomUUID(),
       });
       const queued = expectAnswer(answer, isTestDelivery, 'a test delivery');
-      out.result(queued, () => `Queued a test event: delivery ${queued.delivery_id}`);
+      out.result(queued, () => `Queued a test event: delivery ${oneLine(queued.delivery_id, 64)}`);
       if (!out.json) out.note(`See how it went: chesly webhooks deliveries ${shellQuote(id)}`);
     });
 
@@ -193,7 +193,7 @@ Example:
         const flags = [
           options.status ? `--status ${options.status}` : '',
           options.limit ? `--limit ${options.limit}` : '',
-          `--cursor ${shellQuote(page.next_cursor)}`,
+          `--cursor ${shellQuote(oneLine(page.next_cursor))}`,
         ];
         out.note(`Older deliveries: chesly webhooks deliveries ${shellQuote(id)} ${flags.filter(Boolean).join(' ')}`);
       }

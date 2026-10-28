@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { keyOnce } from '../auth.js';
 import { parseLimit, parseNetwork } from '../options.js';
-import { Output, shellQuote, type Io } from '../output.js';
+import { Output, oneLine, shellQuote, type Io } from '../output.js';
 import { transcript } from '../render.js';
 import { CHAT_ARGUMENT_HELP, resolveChat } from '../resolve-chat.js';
 import { expectAnswer, isMessageList } from '../shapes.js';
@@ -46,7 +46,7 @@ Examples:
       out.result(page, () => (page.messages.length === 0 ? 'No messages.' : transcript(page.messages)));
       if (!out.json && page.next_cursor) {
         const limit = options.limit === undefined ? '' : ` --limit ${options.limit}`;
-        out.note(`Older messages: chesly read ${shellQuote(chatId)}${limit} --cursor ${shellQuote(page.next_cursor)}`);
+        out.note(`Older messages: chesly read ${shellQuote(chatId)}${limit} --cursor ${shellQuote(oneLine(page.next_cursor))}`);
       }
     });
 }

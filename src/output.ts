@@ -57,9 +57,12 @@ export class Output {
     this.json = options.json === true || !io.isTTY;
   }
 
-  /** The command's result: `data` exactly as JSON, or `human()` in a terminal. */
+  /**
+   * The command's result: `data` exactly as JSON, or `human()` in a terminal. Everything printed for
+   * people goes through terminalSafe, whatever the renderer did: much of it comes from the API.
+   */
   result(data: unknown, human: () => string): void {
-    this.io.out(this.json ? `${toJson(data, 2)}\n` : withNewline(human()));
+    this.io.out(this.json ? `${toJson(data, 2)}\n` : withNewline(terminalSafe(human())));
   }
 
   /**
@@ -67,7 +70,7 @@ export class Output {
    * in the result, or the command sends a JSON notice instead (`notice`, `warn`).
    */
   note(text: string): void {
-    if (!this.json) this.io.err(withNewline(text));
+    if (!this.json) this.io.err(withNewline(terminalSafe(text)));
   }
 
   /**
@@ -75,7 +78,7 @@ export class Output {
    * mode, `human()` in a terminal.
    */
   notice(data: unknown, human: () => string): void {
-    this.io.err(this.json ? `${toJson(data)}\n` : withNewline(human()));
+    this.io.err(this.json ? `${toJson(data)}\n` : withNewline(terminalSafe(human())));
   }
 
   /** A warning on stderr: `{ "warning": <code>, "message", ...extras }` as one JSON line, or the message. */
@@ -85,7 +88,7 @@ export class Output {
 
   /** One result of a stream, written at once: `data` as one JSON line, or `human()` in a terminal. */
   line(data: unknown, human: () => string): void {
-    this.io.out(this.json ? `${toJson(data)}\n` : withNewline(human()));
+    this.io.out(this.json ? `${toJson(data)}\n` : withNewline(terminalSafe(human())));
   }
 }
 

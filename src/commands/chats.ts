@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import { apiRequest } from '../api.js';
 import { requireKey } from '../auth.js';
 import { parseLimit, parseNetwork } from '../options.js';
-import { Output, shellQuote, type Io } from '../output.js';
+import { Output, oneLine, shellQuote, type Io } from '../output.js';
 import { chatTable } from '../render.js';
 import { expectAnswer, isChatPage } from '../shapes.js';
 
@@ -60,7 +60,7 @@ Examples:
           options.account ? `--account ${shellQuote(options.account)}` : '',
           options.network ? `--network ${options.network}` : '',
           options.limit ? `--limit ${options.limit}` : '',
-          `--cursor ${shellQuote(page.next_cursor)}`,
+          `--cursor ${shellQuote(oneLine(page.next_cursor))}`,
         ];
         out.note(`More chats: chesly chats ${flags.filter(Boolean).join(' ')}`);
       }
