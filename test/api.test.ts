@@ -182,7 +182,10 @@ describe('output and exit codes', () => {
     [503, 'search_unavailable', 5],
     [503, 'feed_unavailable', 5],
     [503, 'network_unavailable', 5],
-    [502, 'http_502', 1],
+    // A gateway's errors are "retry later" too.
+    [502, 'http_502', 5],
+    [504, 'http_504', 5],
+    [409, 'idempotency_in_progress', 5],
   ])('an_api_%i_%s_exits_%i', async (status, code, exitCode) => {
     vi.stubEnv('CHESLY_API_KEY', KEY);
     mockFetch(() => problem(status, code, { request_id: 'req_xyz' }, { 'retry-after': '7' }));
@@ -246,7 +249,7 @@ describe('output and exit codes', () => {
     );
     const cap = captureIo();
 
-    expect(await run(['whoami'], cap.io)).toBe(1);
+    expect(await run(['whoami'], cap.io)).toBe(5);
 
     expect(JSON.parse(cap.stderr)).toEqual({
       type: 'https://agents.chesly.app/docs/errors#http_502',
@@ -270,7 +273,7 @@ describe('output and exit codes', () => {
             headers: { 'content-type': 'application/problem+json; charset=utf-8' },
           }),
         byContentType,
-        1,
+        5,
       ],
       [() => json(503, byType), byType, 5],
     ];
@@ -290,7 +293,7 @@ describe('output and exit codes', () => {
     // A `code` that is a sentence doesn't make an answer a problem either.
     mockFetch(() => json(502, { code: 'Upstream went away' }));
     const sentence = captureIo();
-    expect(await run(['whoami'], sentence.io)).toBe(1);
+    expect(await run(['whoami'], sentence.io)).toBe(5);
     expect(JSON.parse(sentence.stderr)).toMatchObject({ code: 'http_502', status: 502 });
   });
 

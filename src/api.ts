@@ -159,18 +159,18 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
 
 /** The waits before a POST's next attempt after a network error or a 502, 503 or 504: 1 s, then 2 s. */
 const RETRY_DELAYS_MS = [1000, 2000];
-/** A POST gives up at the fifth answer saying its first attempt is still running. */
-const MAX_IN_PROGRESS = 5;
-/** The longest wait a 409's Retry-After gets. */
+/** A POST gives up at the third answer saying its first attempt is still running. */
+const MAX_IN_PROGRESS = 3;
+/** The longest wait between those tries. */
 const MAX_IN_PROGRESS_WAIT_S = 10;
 
 /**
  * POSTs `body` with `Idempotency-Key: <idempotencyKey>` and retries with the same key, so the API
  * acts at most once however often the request goes out:
  * - after a network error or a 502, 503 or 504: up to 2 more attempts, 1 s and then 2 s later;
- * - after a 409 `idempotency_in_progress` (the first attempt is still running): again after its
- *   Retry-After (1 s), until the fifth such answer. Asking again replays the first attempt's answer
- *   once there is one, or takes over its work.
+ * - after a 409 `idempotency_in_progress` (the first attempt is still running): 3 tries in all, 1 s
+ *   and then 2 s apart, or the answer's Retry-After when longer. Asking again replays the first
+ *   attempt's answer once there is one, or takes over its work.
  * Giving up without knowing what happened, it adds the key to the error (`idempotency_key`) and says
  * how to ask again with it.
  */
@@ -194,10 +194,11 @@ export async function idempotentPost<T>(
           throw new AnnotatedError(
             error,
             { idempotency_key: init.idempotencyKey },
-            `The first attempt is still running. Run the same command again with --idempotency-key ${init.idempotencyKey} to see its result.`,
+            `The first attempt is still running. Run the command again with --idempotency-key ${init.idempotencyKey} to see its result.`,
           );
         }
-        await sleep(Math.min(Math.max(error.retryAfter ?? 1, 1), MAX_IN_PROGRESS_WAIT_S) * 1000);
+        const backoff = 2 ** (inProgress - 1);
+        await sleep(Math.min(Math.max(error.retryAfter ?? 1, backoff), MAX_IN_PROGRESS_WAIT_S) * 1000);
         continue;
       }
       if (!isTransient(error)) throw error;
@@ -206,7 +207,7 @@ export async function idempotentPost<T>(
         throw new AnnotatedError(
           error,
           { idempotency_key: init.idempotencyKey },
-          `It may have gone through. To retry without repeating it, run the same command again with --idempotency-key ${init.idempotencyKey}.`,
+          `It may have gone through. To retry without repeating it, run the command again with --idempotency-key ${init.idempotencyKey}.`,
         );
       }
       await sleep(delay);

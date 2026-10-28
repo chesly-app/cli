@@ -43,8 +43,9 @@ Exit codes:
   2  usage
   3  not signed in
   4  not found or ambiguous
-  5  temporary, retry later: rate limited (429) or briefly unavailable (503);
-     retry_after, when there is one, says when
+  5  temporary, retry later: rate limited (429), briefly unavailable (502, 503,
+     504), or a first attempt still running (409); retry_after, when there is
+     one, says when
   6  payment required: an API plan is needed, or a limit of the plan is reached
 
 Examples:

@@ -193,31 +193,33 @@ describe('chesly send', () => {
     const attempts = sends(calls);
     expect(attempts).toHaveLength(3);
     expect(new Set(attempts.map((attempt) => attempt.headers['idempotency-key'])).size).toBe(1);
-    expect((attempts[2]?.at ?? 0) - (attempts[0]?.at ?? 0)).toBe(2000);
+    // Backing off: 1 s, then 2 s (or the answer's Retry-After, when longer).
+    expect(attempts.map((attempt) => attempt.at - (attempts[0]?.at ?? 0))).toEqual([0, 1000, 3000]);
   });
 
-  it('five_409s_exit_1_with_the_run_again_message', async () => {
+  it('three_409s_exit_5_with_the_run_again_message', async () => {
     vi.useFakeTimers();
     const inProgress = () =>
       new Response(JSON.stringify({ ...problemBody(409, 'idempotency_in_progress'), retry_after: 1 }), {
         status: 409,
         headers: { 'content-type': 'application/problem+json', 'retry-after': '1' },
       });
-    const answers = () => inTurn(inProgress, inProgress, inProgress, inProgress, inProgress, () => json(201, sent('queued')));
+    const answers = () => inTurn(inProgress, inProgress, inProgress, () => json(201, sent('queued')));
 
+    // Three tries, then "retry later" (5): the first attempt may still finish.
     let calls = serve({ [SEND_PATH]: answers() });
     const terminal = captureIo(true);
-    expect(await runToEnd(['send', MOM.id, 'On my way'], terminal.io)).toBe(1);
-    expect(sends(calls)).toHaveLength(5);
+    expect(await runToEnd(['send', MOM.id, 'On my way'], terminal.io)).toBe(5);
+    expect(sends(calls)).toHaveLength(3);
     const key = sends(calls)[0]?.headers['idempotency-key'];
     expect(terminal.stderr).toContain('The first attempt is still running.');
-    expect(terminal.stderr).toContain(`Run the same command again with --idempotency-key ${key} to see its result.`);
+    expect(terminal.stderr).toContain(`Run the command again with --idempotency-key ${key} to see its result.`);
     expect(terminal.stdout).toBe('');
 
     // JSON mode: the API's problem, retry_after included, and the key to ask again with.
     calls = serve({ [SEND_PATH]: answers() });
     const piped = captureIo();
-    expect(await runToEnd(['send', MOM.id, 'On my way'], piped.io)).toBe(1);
+    expect(await runToEnd(['send', MOM.id, 'On my way'], piped.io)).toBe(5);
     expect(JSON.parse(piped.stderr)).toEqual({
       ...problemBody(409, 'idempotency_in_progress'),
       retry_after: 1,

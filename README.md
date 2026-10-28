@@ -130,11 +130,12 @@ is why the caps exist. `chesly usage` shows how much each account has left.
 
 **Sending at most once.** Every send carries an `Idempotency-Key`: a new one per run unless you pass
 `--idempotency-key <key>`. The CLI retries a network error or a 502, 503 or 504 (twice, after 1
-and 2 seconds) and waits while a first attempt is still running (409 `idempotency_in_progress`),
-always with the same key, so a flaky connection never sends a message twice. When it gives up without knowing
-whether the message went out, the error carries the key as `idempotency_key`: run the same command
-again with `--idempotency-key <that key>`, and the API answers with the first attempt's result
-instead of sending again.
+and 2 seconds), and asks again while a first attempt is still running (409
+`idempotency_in_progress`: 3 tries, 1 and then 2 seconds apart, then exit 5), always with the same
+key, so a flaky connection never sends a message twice. When it gives up without knowing whether
+the message went out, the error carries the key as `idempotency_key`: run the command again with
+`--idempotency-key <that key>`, and the API answers with the first attempt's result instead of
+sending again.
 
 ## Watch events
 
@@ -308,7 +309,7 @@ included, on every network but email (add `--network email` for email threads):
   | 2 | usage |
   | 3 | not signed in (no key, a malformed one, or the key was rejected) |
   | 4 | not found (an unknown chat, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
-  | 5 | temporary, retry later: rate limited (a 429: too many requests, a send cap, or too many open event streams) or briefly unavailable (a 503). `retry_after` says when, if the answer has it |
+  | 5 | temporary, retry later: rate limited (a 429: too many requests, a send cap, or too many open event streams), briefly unavailable (a 502, 503 or 504, from the API or a gateway), or a first attempt still running (a 409 `idempotency_in_progress`). `retry_after` says when, if the answer has it |
   | 6 | payment required: the account needs an API plan, or a limit of its plan is reached |
 
 - **MCP:** give Claude Code the Chesly MCP server with your key:

@@ -270,16 +270,20 @@ function describeFailure(error: unknown): Failure {
   return { message, exitCode: EXIT.ERROR, problem: cliProblem('internal_error', message) };
 }
 
+/** Answers that mean "temporary, retry later", with retry_after or not: limits, and gateways or the API briefly away. */
+const RETRY_LATER_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
+
 /**
  * The exit code for an API error. A 400 invalid_request is a usage error, as one the CLI finds is.
- * Every 429 and 503 is "temporary, retry later", with retry_after or not.
+ * A 429, a 502-504 and a first attempt still running (409 idempotency_in_progress) are "retry later".
  */
 function exitCodeFor(error: CheslyApiError): ExitCode {
   if (error.status === 400 && error.code === 'invalid_request') return EXIT.USAGE;
   if (error.status === 401) return EXIT.NOT_SIGNED_IN;
   if (error.status === 402) return EXIT.PAYMENT_REQUIRED;
   if (error.status === 404) return EXIT.NOT_FOUND;
-  if (error.status === 429 || error.status === 503) return EXIT.RETRY_LATER;
+  if (RETRY_LATER_STATUSES.has(error.status)) return EXIT.RETRY_LATER;
+  if (error.status === 409 && error.code === 'idempotency_in_progress') return EXIT.RETRY_LATER;
   return EXIT.ERROR;
 }
 
