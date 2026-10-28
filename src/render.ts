@@ -262,7 +262,7 @@ export function usageSummary(me: Me): string {
   const lines: string[] = [];
   const plan = isRecord(me.plan) ? me.plan : undefined;
   if (plan !== undefined) lines.push(planLine(plan));
-  if (plan !== undefined && plan.status !== 'none' && plan.status !== 'canceled') {
+  if (plan !== undefined && plan.status !== 'none' && plan.status !== 'canceled' && plan.status !== 'unpaid') {
     lines.push(`Calls this period: ${count(plan.calls_this_period)} of ${count(plan.included_calls)} included`);
     if (plan.billing_route === 'packs' && typeof plan.pack_balance_calls === 'number') {
       lines.push(`Call packs left: ${count(plan.pack_balance_calls)} calls`);
@@ -281,6 +281,9 @@ export function usageSummary(me: Me): string {
 function planLine(plan: PlanSummary): string {
   const status = oneLine(String(plan.status), 20);
   if (plan.status === 'none' || plan.status === 'canceled') return `Plan: ${status}. Start one at ${BILLING_URL}`;
+  if (plan.status === 'unpaid') return `Plan: unpaid, so calls are refused. Pay it or update the card at ${BILLING_URL}`;
+  const ends = formatWhen(plan.cancel_at);
+  if (ends !== '') return `Plan: ${status.replaceAll('_', ' ')}, canceled: it ends ${ends}`;
   const trialEnds = plan.status === 'trialing' ? formatWhen(plan.trial_ends_at) : '';
   return trialEnds === '' ? `Plan: ${status.replaceAll('_', ' ')}` : `Plan: ${status}, the trial ends ${trialEnds}`;
 }

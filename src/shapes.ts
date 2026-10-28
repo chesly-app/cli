@@ -25,8 +25,11 @@ export interface Me {
 
 /** The API plan and this period's usage, from `GET /v1/me`. Amounts are in cents. */
 export interface PlanSummary {
-  status: 'none' | 'trialing' | 'active' | 'past_due' | 'canceled' | 'comped';
+  /** unpaid: Stripe stopped retrying the payment, and there is no access. */
+  status: 'none' | 'trialing' | 'active' | 'past_due' | 'unpaid' | 'canceled' | 'comped';
   trial_ends_at: string | null;
+  /** When a canceled plan ends (the end of the period paid for); null while it renews. */
+  cancel_at?: string | null;
   period_start: string | null;
   period_end: string | null;
   included_calls: number;

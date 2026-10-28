@@ -183,6 +183,24 @@ describe('chesly usage', () => {
     expect(none.stdout).toMatch(/^Plan: none\. Start one at https:\/\/web\.chesly\.app\/api\/billing\n/);
   });
 
+  it('usage_says_when_a_plan_is_unpaid_or_ends', async () => {
+    // unpaid: Stripe stopped retrying, so there is no access; cancel_at: a canceled plan's last day.
+    serve({ '/v1/me': () => json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, status: 'unpaid', trial_ends_at: null, cancel_at: null } }) });
+    const unpaid = captureIo(true);
+    expect(await run(['usage'], unpaid.io)).toBe(0);
+    expect(unpaid.stdout).toMatch(/^Plan: unpaid, so calls are refused\. Pay it or update the card at https:\/\/web\.chesly\.app\/api\/billing\n/);
+    expect(unpaid.stdout).not.toContain('Calls this period');
+
+    serve({
+      '/v1/me': () =>
+        json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, status: 'active', trial_ends_at: null, cancel_at: '2026-11-28T09:00:00.000Z' } }),
+    });
+    const ending = captureIo(true);
+    expect(await run(['usage'], ending.io)).toBe(0);
+    expect(ending.stdout).toMatch(/^Plan: active, canceled: it ends Nov 28\n/);
+    expect(ending.stdout).toContain('Calls this period: 12,345 of 50,000 included');
+  });
+
   it('usage_json_is_the_me_answer', async () => {
     serve({ '/v1/me': () => json(200, ME_WAVE_2) });
     const piped = captureIo();
