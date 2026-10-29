@@ -43,10 +43,10 @@ Exit codes:
   2  usage
   3  not signed in
   4  not found or ambiguous
-  5  not final, come back to it: rate limited (429), briefly unavailable (502,
-     503, 504), a first attempt still running (409), or a send the network
-     didn't confirm (check the chat before sending again); retry_after, when
-     there is one, says when
+  5  not final, come back to it: rate limited (429), an upload that took too
+     long (408), briefly unavailable (502, 503, 504), a first attempt still
+     running (409), or a send the network didn't confirm (check the chat
+     before sending again); retry_after, when there is one, says when
   6  payment required: an API plan is needed, or a limit of the plan is reached
 
 Examples:

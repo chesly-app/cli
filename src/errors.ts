@@ -5,7 +5,10 @@ export const EXIT = {
   USAGE: 2,
   NOT_SIGNED_IN: 3,
   NOT_FOUND: 4,
-  /** Temporary: a 429 (a limit), a 502-504 (briefly unavailable) or a first attempt still running (409). Retry later. */
+  /**
+   * Temporary: a 429 (a limit), a 408 (a request, such as an upload, too slow to arrive), a 502-504
+   * (briefly unavailable) or a first attempt still running (409). Retry later.
+   */
   RETRY_LATER: 5,
   /** A 402: the account needs an API plan, or its plan's limits are reached. */
   PAYMENT_REQUIRED: 6,
@@ -98,6 +101,7 @@ export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; titl
   { code: 'text_too_long', status: 400, title: 'The text is too long for this network.' },
   { code: 'invalid_reply_to', status: 400, title: 'reply_to must be a message in this chat.' },
   { code: 'unsupported_chat', status: 400, title: "Chesly can't send to this chat." },
+  { code: 'upload_timeout', status: 408, title: 'The upload took too long to arrive.' },
   { code: 'events_expired', status: 410, title: 'These events are no longer kept.' },
   { code: 'too_many_streams', status: 429, title: 'Too many open event streams.' },
   { code: 'webhook_not_found', status: 404, title: 'Webhook not found.' },
@@ -119,13 +123,17 @@ export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; titl
   { code: 'payload_too_large', status: 413, title: 'The request body is too large.' },
 ];
 
-/** Answers that mean "not final, come back to it", with retry_after or not: limits, and gateways or the API briefly away. */
-export const RETRY_LATER_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
+/**
+ * Answers that mean "not final, come back to it", with retry_after or not: limits, a request that
+ * took too long to arrive (408: the API's upload_timeout, or a gateway's), and gateways or the API
+ * briefly away.
+ */
+export const RETRY_LATER_STATUSES: ReadonlySet<number> = new Set([408, 429, 502, 503, 504]);
 
 /**
  * The exit code for an API answer. A 400 invalid_request is a usage error, as one the CLI finds is.
- * A 429, a 502-504 and a first attempt still running (409 idempotency_in_progress) are "come back to
- * it" (5). Anything not named here is 1.
+ * A 408, a 429, a 502-504 and a first attempt still running (409 idempotency_in_progress) are "come
+ * back to it" (5). Anything not named here is 1.
  */
 export function apiExitCode(status: number, code: string): ExitCode {
   if (status === 400 && code === 'invalid_request') return EXIT.USAGE;

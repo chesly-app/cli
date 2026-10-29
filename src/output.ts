@@ -220,7 +220,8 @@ interface Failure {
 
 /**
  * The API's details for these codes name REST paths and parameters a CLI user never types
- * (GET /v1/chats, account_id). A terminal shows the code's title, or `message`, then the CLI's way on.
+ * (GET /v1/chats, account_id), or leave out what comes next (after an upload_timeout, the account's
+ * uploads are held 60 s). A terminal shows the code's title, or `message`, then the CLI's way on.
  * JSON mode keeps the problem as the API sent it.
  */
 const CLI_WORDING: Readonly<Record<string, { message?: string; hint: string }>> = {
@@ -238,6 +239,12 @@ const CLI_WORDING: Readonly<Record<string, { message?: string; hint: string }>> 
     hint: 'chesly read <chat> shows its messages with their IDs.',
   },
   webhook_not_found: { hint: 'chesly webhooks list lists your webhooks.' },
+  upload_timeout: {
+    message: "The upload was too slow, or didn't finish within 60 s.",
+    hint:
+      "Send it again in 60 s: this account's uploads are held that long after a slow one. " +
+      'On a slow connection, send a smaller file.',
+  },
   key_not_found: { hint: 'chesly keys list lists your API keys.' },
 };
 

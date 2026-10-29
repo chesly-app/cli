@@ -147,8 +147,8 @@ inside double quotes the shell still expands `$` and backticks, so "It costs $5"
 
 A file can be at most 50 MB (50,000,000 bytes); a bigger one is refused before anything is uploaded.
 An upload must arrive whole within 60 seconds, at 50 KB/s or faster on average. A slower one is
-refused, and so are the account's uploads for the next 60 seconds (429 `rate_limited`: exit 5, with
-the seconds left).
+refused (408 `upload_timeout`), and so are the account's uploads for the next 60 seconds (429
+`rate_limited`, with the seconds left); both exit 5. On a slow connection, send a smaller file.
 
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
 takes it; `--wait` checks every second (or later, when a refused check's Retry-After says so),
@@ -368,7 +368,7 @@ included, on every network but email (add `--network email` for email threads):
   | 2 | usage |
   | 3 | not signed in (no key, a malformed one, or the key was rejected) |
   | 4 | not found (an unknown chat, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
-  | 5 | not final, come back to it: rate limited (a 429: too many requests, a send cap, uploads held after a slow one, or too many open event streams), briefly unavailable (a 502, 503 or 504, from the API or a gateway), a first attempt still running (a 409 `idempotency_in_progress`), or a send the network didn't confirm (`delivery_unconfirmed`: check the chat before you send it again). `retry_after` says when, if the answer has it |
+  | 5 | not final, come back to it: rate limited (a 429: too many requests, a send cap, uploads held after a slow one, or too many open event streams), a request that took too long to arrive (a 408, such as an upload's `upload_timeout`), briefly unavailable (a 502, 503 or 504, from the API or a gateway), a first attempt still running (a 409 `idempotency_in_progress`), or a send the network didn't confirm (`delivery_unconfirmed`: check the chat before you send it again). `retry_after` says when, if the answer has it |
   | 6 | payment required: the account needs an API plan, or a limit of its plan is reached |
 
 - **MCP:** give Claude Code the Chesly MCP server with your key:

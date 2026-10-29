@@ -372,6 +372,38 @@ describe('chesly send', () => {
     }
   });
 
+  it('an_upload_that_took_too_long_exits_5_and_says_to_send_it_again_after_the_hold', async () => {
+    // R113: an upload too slow, or not whole within 60 s, is 408 upload_timeout, and the account's
+    // uploads are then held 60 s (429 rate_limited). The command was fine: come back to it.
+    vi.useFakeTimers();
+    const photo = join(env.home, 'beach.jpg');
+    writeFileSync(photo, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+    const tooSlow = problemBody(408, 'upload_timeout', {
+      title: 'The upload took too long to arrive.',
+      detail: "The upload was too slow or didn't finish within 60 s. Send it again.",
+    });
+    const answer = () =>
+      new Response(JSON.stringify(tooSlow), { status: 408, headers: { 'content-type': 'application/problem+json' } });
+
+    const calls = serve({ '/v1/media': answer, [SEND_PATH]: () => json(201, sent('queued')) });
+    const terminal = captureIo(true);
+    expect(await runToEnd(['send', MOM.id, 'Look', '--file', photo], terminal.io)).toBe(5);
+    expect(terminal.stderr).toBe(
+      "Error: The upload was too slow, or didn't finish within 60 s. (request req_test)\n" +
+        "Send it again in 60 s: this account's uploads are held that long after a slow one. " +
+        'On a slow connection, send a smaller file.\n',
+    );
+    // One upload, never asked again, and nothing sent.
+    expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual(['POST /v1/media']);
+
+    // JSON mode: the API's problem as sent.
+    serve({ '/v1/media': answer, [SEND_PATH]: () => json(201, sent('queued')) });
+    const piped = captureIo();
+    expect(await runToEnd(['send', MOM.id, 'Look', '--file', photo], piped.io)).toBe(5);
+    expect(JSON.parse(piped.stderr)).toEqual(tooSlow);
+    expect(piped.stdout).toBe('');
+  });
+
   it('a_402_exits_6', async () => {
     const calls = serve({ [SEND_PATH]: () => problem(402, 'api_plan_required', { title: 'An API plan is required.' }) });
     const cap = captureIo();

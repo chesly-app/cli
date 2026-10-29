@@ -622,6 +622,7 @@ describe('cli errors', () => {
       text_too_long: [400, 1],
       invalid_reply_to: [400, 1],
       unsupported_chat: [400, 1],
+      upload_timeout: [408, 5],
       events_expired: [410, 1],
       too_many_streams: [429, 5],
       webhook_not_found: [404, 4],

@@ -186,6 +186,8 @@ describe('output and exit codes', () => {
     [502, 'http_502', 5],
     [504, 'http_504', 5],
     [409, 'idempotency_in_progress', 5],
+    // A request that took too long to arrive (R113: an upload too slow, or not whole within 60 s).
+    [408, 'upload_timeout', 5],
   ])('an_api_%i_%s_exits_%i', async (status, code, exitCode) => {
     vi.stubEnv('CHESLY_API_KEY', KEY);
     mockFetch(() => problem(status, code, { request_id: 'req_xyz' }, { 'retry-after': '7' }));
@@ -261,6 +263,12 @@ describe('output and exit codes', () => {
       code: 'http_502',
       request_id: 'req_gw',
     });
+
+    // Any 408 is "send it again": the request didn't arrive in time, whoever says so.
+    mockFetch(() => new Response('<html>Request Timeout</html>', { status: 408, headers: { 'content-type': 'text/html' } }));
+    const timedOut = captureIo();
+    expect(await run(['whoami'], timedOut.io)).toBe(5);
+    expect(JSON.parse(timedOut.stderr)).toMatchObject({ code: 'http_error', status: 408 });
   });
 
   it('a_problem_is_known_by_its_content_type_or_its_type_member', async () => {
