@@ -224,7 +224,11 @@ export interface Webhook {
   networks: string[];
   payload: 'full' | 'ids';
   status: 'enabled' | 'disabled';
-  disabled_reason: 'user' | 'failing' | 'gone' | null;
+  /**
+   * Why it is off: the user turned it off, it failed for 3 days, it answered 410, or the API key that
+   * made or last changed it was revoked because it leaked (`key_revoked`).
+   */
+  disabled_reason: 'user' | 'failing' | 'gone' | 'key_revoked' | null;
   failing_since: string | null;
   created_at: string;
   updated_at: string;

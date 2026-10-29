@@ -255,6 +255,12 @@ seconds, 5 minutes, 30 minutes, 2, 5, 10 and 10 hours (about 28 hours in all). A
 disables the webhook at once, and so do 3 days of failures. The same event can arrive twice: use
 `webhook-id` to skip duplicates.
 
+`list` says why a webhook is off: `disabled: you turned it off`, `it failed for 3 days`, `your
+endpoint answered 410 Gone`, or `the key that set it up was revoked`. That last one comes when
+GitHub's secret scanning finds a Chesly key in public code: Chesly revokes the key and turns off the
+webhooks it made or last changed, since whoever has the key could have pointed them elsewhere.
+Check the URL, then turn the webhook back on in the dashboard at web.chesly.app/api/webhooks.
+
 ## Keys and usage
 
 ```sh

@@ -208,9 +208,19 @@ export function createdWebhook(webhook: Webhook & { secret: string }): string {
   ].join('\n');
 }
 
+/** Why a webhook is off, in the dashboard's words. */
+const DISABLED_BECAUSE: ReadonlyMap<string, string> = new Map([
+  ['user', 'you turned it off'],
+  ['failing', 'it failed for 3 days'],
+  ['gone', 'your endpoint answered 410 Gone'],
+  ['key_revoked', 'the key that set it up was revoked'],
+]);
+
+/** `enabled`, or `disabled: <why>`; a reason this CLI doesn't know yet shows as the API sent it. */
 function webhookStatus(webhook: Webhook): string {
-  const status = oneLine(String(webhook.status), 20);
-  return webhook.status === 'disabled' && webhook.disabled_reason ? `${status} (${oneLine(webhook.disabled_reason, 20)})` : status;
+  const reason = webhook.disabled_reason;
+  if (webhook.status !== 'disabled' || !reason) return oneLine(String(webhook.status), 20);
+  return `disabled: ${DISABLED_BECAUSE.get(String(reason)) ?? oneLine(String(reason), 40)}`;
 }
 
 function listLabel(items: unknown, none: string, max: number): string {

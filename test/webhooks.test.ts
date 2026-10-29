@@ -140,7 +140,7 @@ describe('chesly webhooks', () => {
     expect(first).toMatch(
       new RegExp(`^${ORDERS.id}\\s+enabled\\s+message\\.received,message\\.sent\\s+whatsapp\\s+https://hooks\\.example\\.com/chesly\\s+Orders bot$`),
     );
-    expect(second).toMatch(new RegExp(`^${FAILING.id}\\s+disabled \\(failing\\)\\s+all\\s+all but email\\s+https://old\\.example\\.com/in$`));
+    expect(second).toMatch(new RegExp(`^${FAILING.id}\\s+disabled: it failed for 3 days\\s+all\\s+all but email\\s+https://old\\.example\\.com/in$`));
     // Listing never shows a secret.
     expect(terminal.stdout).not.toContain('whsec_');
 
@@ -148,6 +148,47 @@ describe('chesly webhooks', () => {
     const empty = captureIo(true);
     expect(await run(['webhooks', 'list'], empty.io)).toBe(0);
     expect(empty.stdout).toMatch(/^No webhooks\./);
+  });
+
+  it('a_disabled_webhook_says_why_in_plain_words', async () => {
+    // key_revoked: GitHub secret scanning found the key that made or last changed the webhook, and
+    // Chesly revoked it (R107, R111). The other reasons read as the dashboard words them.
+    const off = (id: string, reason: unknown) =>
+      webhook(id, `https://example.com/${id}`, { status: 'disabled', disabled_reason: reason });
+    serve({
+      '/v1/webhooks': () =>
+        json(200, {
+          webhooks: [
+            off('wh_revoked', 'key_revoked'),
+            off('wh_user', 'user'),
+            off('wh_failing', 'failing'),
+            off('wh_gone', 'gone'),
+            // A reason this CLI doesn't know yet shows as the API sent it, cleaned for the terminal.
+            off('wh_newer', 'paused_for_review'),
+            off('wh_hostile', 'x\u001b[2Jy'),
+            off('wh_proto', 'constructor'),
+          ],
+        }),
+    });
+
+    const terminal = captureIo(true);
+    expect(await run(['webhooks', 'list'], terminal.io)).toBe(0);
+    const statuses = Object.fromEntries(
+      terminal.stdout
+        .trimEnd()
+        .split('\n')
+        .slice(1)
+        .map((row) => row.split(/\s{2,}/).slice(0, 2)),
+    );
+    expect(statuses).toEqual({
+      wh_revoked: 'disabled: the key that set it up was revoked',
+      wh_user: 'disabled: you turned it off',
+      wh_failing: 'disabled: it failed for 3 days',
+      wh_gone: 'disabled: your endpoint answered 410 Gone',
+      wh_newer: 'disabled: paused_for_review',
+      wh_hostile: 'disabled: x[2Jy',
+      wh_proto: 'disabled: constructor',
+    });
   });
 
   it('delete_of_an_unknown_webhook_exits_4', async () => {
