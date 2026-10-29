@@ -5,6 +5,7 @@ vi.mock('../src/keychain.js', async () => ({ openKeychain: (await import('./help
 import { run } from '../src/cli.js';
 import { inTurn, paramsOf, serve } from './fixtures.js';
 import { KEY, captureIo, isolateEnv, json, keychain, lastLine, problem, problemBody, type FetchCall } from './helpers.js';
+import { runToEnd } from './run-to-end.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 // Built at run time: a secret-shaped literal would trip the secret scanner.
@@ -267,6 +268,38 @@ describe('chesly webhooks', () => {
     expect(await run(['webhooks', 'test', ORDERS.id], piped.io)).toBe(0);
     expect(JSON.parse(piped.stdout)).toEqual({ delivery_id: 'dlv_7sKq2LmN9pX4vR8tB3cZ' });
     expect(piped.stderr).toBe('');
+  });
+
+  it('a_test_event_too_soon_exits_5_with_the_apis_detail_and_is_asked_once', async () => {
+    // One test event a webhook every 10 s (R107): the API's detail says when, and the CLI doesn't
+    // ask again by itself.
+    vi.useFakeTimers();
+    const path = `/v1/webhooks/${ORDERS.id}/test`;
+    const tooSoon = {
+      ...problemBody(429, 'rate_limited', {
+        title: 'Too many requests.',
+        detail: 'One test event a webhook every 10 seconds. Retry in 7 s.',
+      }),
+      retry_after: 7,
+    };
+    const refuse = () =>
+      new Response(JSON.stringify(tooSoon), {
+        status: 429,
+        headers: { 'content-type': 'application/problem+json', 'retry-after': '7' },
+      });
+
+    let calls = serve({ [path]: refuse });
+    const terminal = captureIo(true);
+    expect(await runToEnd(['webhooks', 'test', ORDERS.id], terminal.io)).toBe(5);
+    expect(terminal.stderr).toBe('Error: One test event a webhook every 10 seconds. Retry in 7 s. (request req_test)\n');
+    expect(terminal.stdout).toBe('');
+    expect(posts(calls, path)).toHaveLength(1);
+
+    calls = serve({ [path]: refuse });
+    const piped = captureIo();
+    expect(await runToEnd(['webhooks', 'test', ORDERS.id], piped.io)).toBe(5);
+    expect(JSON.parse(piped.stderr)).toEqual(tooSoon);
+    expect(posts(calls, path)).toHaveLength(1);
   });
 
   it('server_text_in_results_and_notes_is_cleaned_for_the_terminal', async () => {

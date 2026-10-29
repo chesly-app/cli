@@ -40,6 +40,20 @@ function sent(status: 'queued' | 'sent' | 'delivered' | 'failed', extra: Record<
 
 const LOOKUP = { '/v1/chats': () => json(200, { chats: [BOOK_CLUB, MOM], next_cursor: null }) };
 
+/** A refusal with a Retry-After, in the body and the header, as the API sends one. */
+function refused(status: number, code: string, detail: string, seconds: number) {
+  const body = { ...problemBody(status, code, { title: 'Too many requests.', detail }), retry_after: seconds };
+  return {
+    body,
+    detail,
+    answer: () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/problem+json', 'retry-after': String(seconds) },
+      }),
+  };
+}
+
 function sends(calls: FetchCall[]): FetchCall[] {
   return calls.filter((call) => call.method === 'POST' && new URL(call.url).pathname === SEND_PATH);
 }
@@ -330,6 +344,34 @@ describe('chesly send', () => {
     expect(JSON.parse(piped.stderr)).toEqual(limited);
   });
 
+  it('an_upload_the_api_holds_exits_5_with_its_detail_and_is_asked_once', async () => {
+    // After an upload that arrived too slowly, the API holds the account's uploads 60 s, and it takes
+    // one upload a user at a time (R107, R112). Either 429 is the API's to explain: its detail says
+    // when, the exit is 5, and the CLI never asks again by itself.
+    vi.useFakeTimers();
+    const photo = join(env.home, 'beach.jpg');
+    writeFileSync(photo, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+    const holds = [
+      refused(429, 'rate_limited', "This account's last upload arrived too slowly. Retry in 47 s.", 47),
+      refused(429, 'rate_limited', 'Too many uploads at once. Retry in a few seconds.', 2),
+    ];
+    for (const held of holds) {
+      const calls = serve({ '/v1/media': held.answer, [SEND_PATH]: () => json(201, sent('queued')) });
+      const terminal = captureIo(true);
+      expect(await runToEnd(['send', MOM.id, 'Look', '--file', photo], terminal.io)).toBe(5);
+      // The detail already says when: no second "Retry in".
+      expect(terminal.stderr).toBe(`Error: ${held.detail} (request req_test)\n`);
+      // One upload, and nothing sent.
+      expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual(['POST /v1/media']);
+
+      serve({ '/v1/media': held.answer, [SEND_PATH]: () => json(201, sent('queued')) });
+      const piped = captureIo();
+      expect(await runToEnd(['send', MOM.id, 'Look', '--file', photo], piped.io)).toBe(5);
+      expect(JSON.parse(piped.stderr)).toEqual(held.body);
+      expect(piped.stdout).toBe('');
+    }
+  });
+
   it('a_402_exits_6', async () => {
     const calls = serve({ [SEND_PATH]: () => problem(402, 'api_plan_required', { title: 'An API plan is required.' }) });
     const cap = captureIo();
@@ -475,6 +517,39 @@ describe('chesly send', () => {
     expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], terminal.io)).toBe(0);
     expect(terminal.stdout).toBe('Sent to chat_7Hq2mR9xLp4vT1sK8nWz · queued\n');
     expect(terminal.stderr).toMatch(/^The message was sent, but following its delivery failed/);
+  });
+
+  it('wait_asks_again_no_sooner_than_a_refused_polls_retry_after', async () => {
+    // A rate limit or an outage that says when to come back is taken at its word: the next poll waits
+    // that long, not a second.
+    vi.useFakeTimers();
+    const id = sent('queued').id;
+    let calls = serve({
+      [SEND_PATH]: () => json(201, sent('queued')),
+      [`/v1/messages/${id}`]: inTurn(
+        refused(429, 'rate_limited', 'This API key made more than 10 requests in one second. Retry in 5 s.', 5).answer,
+        refused(503, 'upstream_unavailable', 'Chesly is briefly unavailable.', 3).answer,
+        () => json(200, sent('sent')),
+      ),
+    });
+    expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], captureIo().io)).toBe(0);
+    const polls = calls.filter((call) => call.method === 'GET');
+    expect(polls.map((poll) => poll.at - (sends(calls)[0]?.at ?? 0))).toEqual([1000, 6000, 9000]);
+
+    // A wait past the 30 s ends it at once: the message is printed, and following it failed.
+    calls = serve({
+      [SEND_PATH]: () => json(201, sent('queued')),
+      [`/v1/messages/${id}`]: refused(429, 'rate_limited', 'Retry in 60 s.', 60).answer,
+    });
+    const piped = captureIo();
+    const start = Date.now();
+    expect(await runToEnd(['send', MOM.id, 'On my way', '--wait'], piped.io)).toBe(0);
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(calls.filter((call) => call.method === 'GET')).toHaveLength(1);
+    expect(JSON.parse(piped.stdout)).toEqual(sent('queued'));
+    const warning = JSON.parse(piped.stderr);
+    expect(warning).toMatchObject({ warning: 'delivery_wait_failed' });
+    expect(warning.message).toContain('(429 rate_limited)');
   });
 
   it('a_poll_cut_off_by_the_deadline_is_still_queued', async () => {

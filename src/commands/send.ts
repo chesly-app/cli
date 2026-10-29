@@ -57,13 +57,13 @@ ${CHAT_ARGUMENT_HELP}
 Prints the message the API answered: its JSON, or "Sent to <chat> · <status>"
 in a terminal. The status is queued until the network takes the message;
 with --wait the command waits up to 30 s in all for sent, delivered or failed
-(it asks once a second, and each ask is a metered API call). A failure the
-network confirms exits 1 (delivery_failed) with the reason. One it didn't
-confirm reads "unconfirmed": the message may have been delivered, so check the
-chat before you send it again; --wait goes on asking, and if it stays
-unconfirmed the command exits 5 (delivery_unconfirmed). Once the message went
-out it is always printed, and following it failing is only a warning on stderr
-(delivery_wait_failed).
+(it asks once a second, or later when a refused ask's Retry-After says so,
+and each ask is a metered API call). A failure the network confirms exits 1
+(delivery_failed) with the reason. One it didn't confirm reads "unconfirmed":
+the message may have been delivered, so check the chat before you send it
+again; --wait goes on asking, and if it stays unconfirmed the command exits 5
+(delivery_unconfirmed). Once the message went out it is always printed, and
+following it failing is only a warning on stderr (delivery_wait_failed).
 
 Every send carries an Idempotency-Key, and the CLI's own retries (after a
 network error, a 502, 503 or 504, or while a first attempt is still running)
@@ -186,16 +186,19 @@ async function messageText(text: string | undefined, io: Io): Promise<string | u
  * Polls `GET /v1/messages/{id}` once a second until the delivery is sent, delivered or failed, within
  * one 30 s deadline: each poll gets only the time left, and none starts with less than 1 s. The
  * message went out either way, so nothing here throws. A poll the deadline cuts off leaves it still
- * queued. A poll that fails for a moment (no answer, a 5xx, a 429) is tried again until the deadline;
- * any other failure (401, 402, 404, an answer that isn't a message) ends the wait at once.
+ * queued. A poll that fails for a moment (no answer, a 5xx, a 429) is tried again until the deadline,
+ * never sooner than its Retry-After, and a Retry-After past the deadline ends the wait with that
+ * failure; any other failure (401, 402, 404, an answer that isn't a message) ends the wait at once.
  */
 async function waitForDelivery(sent: Message, key: string): Promise<Waited> {
   let message = sent;
   let failure: string | undefined;
+  let pauseMs = POLL_MS;
   const deadline = Date.now() + WAIT_MS;
   while (!settled(message)) {
-    if (deadline - Date.now() < POLL_MS + MIN_POLL_MS) return { message, ranOut: failure === undefined, failure };
-    await sleep(POLL_MS);
+    if (deadline - Date.now() < pauseMs + MIN_POLL_MS) return { message, ranOut: failure === undefined, failure };
+    await sleep(pauseMs);
+    pauseMs = POLL_MS;
     try {
       const timeoutMs = deadline - Date.now();
       const polled = await apiRequest<unknown>(`/v1/messages/${encodeURIComponent(message.id)}`, { key, timeoutMs });
@@ -208,6 +211,9 @@ async function waitForDelivery(sent: Message, key: string): Promise<Waited> {
       failure = pollFailure(error);
       const passing = isTransient(error) || (error instanceof CheslyApiError && error.status === 429);
       if (!passing) return { message, ranOut: false, failure };
+      if (error instanceof CheslyApiError && error.retryAfter !== undefined) {
+        pauseMs = Math.max(POLL_MS, error.retryAfter * 1000);
+      }
     }
   }
   return { message, ranOut: false, failure: undefined };

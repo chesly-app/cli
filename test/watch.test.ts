@@ -213,6 +213,35 @@ describe('chesly watch', () => {
     expect(lines(cap.stderr).map((line) => JSON.parse(line).retry_in_ms)).toEqual([3000, 6000, 12000]);
   });
 
+  it('a_rate_limited_reconnect_waits_the_retry_after', async () => {
+    const calls = serve({
+      [STREAM]: inTurn(
+        () => sseResponse(['retry: 3000\n\n', frame(RECEIVED)], { end: 'drop' }),
+        () =>
+          new Response(JSON.stringify({ ...problemBody(429, 'rate_limited'), retry_after: 20 }), {
+            status: 429,
+            headers: { 'content-type': 'application/problem+json', 'retry-after': '20' },
+          }),
+        (call) => sseResponse([frame(SENT)], { end: 'open', signal: call.signal }),
+      ),
+    });
+    const cap = captureIo();
+
+    const exit = run(['watch'], cap.io);
+    await vi.waitFor(() => expect(lines(cap.stdout)).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(streams(calls)).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(lines(cap.stdout)).toHaveLength(2));
+    cap.interrupt();
+
+    expect(await exit).toBe(0);
+    // Refused 3 s after the drop: the next try comes the API's 20 s later, not the 6 s backoff.
+    const [, refusedAt, resumed] = streams(calls);
+    expect((resumed?.at ?? 0) - (refusedAt?.at ?? 0)).toBe(20_000);
+    expect(lines(cap.stderr).map((line) => JSON.parse(line).retry_in_ms)).toEqual([3000, 20_000]);
+  });
+
   it('an_expired_cursor_warns_and_restarts', async () => {
     const calls = serve({
       [STREAM]: inTurn(
