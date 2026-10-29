@@ -228,13 +228,17 @@ chesly webhooks create https://example.com/chesly --types message.received,messa
 chesly webhooks list
 chesly webhooks test wh_...            # sends a webhook.test event
 chesly webhooks deliveries wh_...      # how the deliveries went: status, attempts, answers
+chesly webhooks deliveries wh_... --status failed
 chesly webhooks rotate wh_...          # a new secret; the old one keeps working for 24 hours
 chesly webhooks delete wh_...
 ```
 
 `create` prints the webhook's signing secret (`whsec_...`) once: keep it. `--networks` limits a
 webhook to some networks (it gets every network but email unless it names email), and
-`--payload ids` sends only the IDs in `data` instead of the whole message.
+`--payload ids` sends only the IDs in `data` instead of the whole message (`full`, the default).
+`deliveries` lists the newest 50 first: `--status` keeps one kind (`pending`, `succeeded`, `failed`
+or `discarded`), `--limit` takes up to 100, and `--cursor` with a page's `next_cursor` goes further
+back.
 
 Each delivery is a `POST` with the event as its JSON body, signed the
 [Standard Webhooks](https://www.standardwebhooks.com) way: the `webhook-id` header (the event ID,
