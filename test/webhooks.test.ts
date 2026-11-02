@@ -270,6 +270,38 @@ describe('chesly webhooks', () => {
     expect(piped.stderr).toBe('');
   });
 
+  it('a_plan_that_cant_be_checked_exits_5_and_says_to_retry', async () => {
+    // R121: creating a webhook while no plan is known and the plan read fails is 503 plan_unavailable,
+    // Retry-After 5. The API doesn't store a 5xx under the Idempotency-Key, so the CLI's own retries
+    // and a later run with the same key are safe.
+    vi.useFakeTimers();
+    const unavailable = { ...problemBody(503, 'plan_unavailable', { title: "Your API plan can't be checked just now." }), retry_after: 5 };
+    const answer = () =>
+      new Response(JSON.stringify(unavailable), {
+        status: 503,
+        headers: { 'content-type': 'application/problem+json', 'retry-after': '5' },
+      });
+    const args = ['webhooks', 'create', 'https://hooks.example.com/chesly', '--idempotency-key', 'k-1'];
+
+    let calls = serve({ '/v1/webhooks': answer });
+    const terminal = captureIo(true);
+    expect(await runToEnd(args, terminal.io)).toBe(5);
+    expect(terminal.stderr.split('\n')).toEqual([
+      "Error: Your API plan can't be checked just now. (request req_test)",
+      'Retry in 5 s.',
+      'It may have gone through. To retry without repeating it, run the command again with --idempotency-key k-1.',
+      '',
+    ]);
+    // Asked three times in all, always with the same key.
+    expect(posts(calls, '/v1/webhooks').map((call) => call.headers['idempotency-key'])).toEqual(['k-1', 'k-1', 'k-1']);
+
+    calls = serve({ '/v1/webhooks': answer });
+    const piped = captureIo();
+    expect(await runToEnd(args, piped.io)).toBe(5);
+    expect(JSON.parse(piped.stderr)).toEqual({ ...unavailable, idempotency_key: 'k-1' });
+    expect(piped.stdout).toBe('');
+  });
+
   it('a_test_event_too_soon_exits_5_with_the_apis_detail_and_is_asked_once', async () => {
     // One test event a webhook every 10 s (R107): the API's detail says when, and the CLI doesn't
     // ask again by itself.

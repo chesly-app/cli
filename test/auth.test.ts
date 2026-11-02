@@ -413,6 +413,31 @@ describe('chesly login', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it('device_login_keeps_waiting_while_the_plan_cant_be_checked', async () => {
+    // R121: an approval that can't check the plan (503 plan_unavailable on the dashboard) leaves the
+    // sign-in pending, so the poll goes on; the same 503 on the poll itself is a passing failure too.
+    vi.useFakeTimers();
+    const answers = [
+      () => json(400, { error: 'authorization_pending' }),
+      () => problem(503, 'plan_unavailable', { title: "Your API plan can't be checked just now." }, { 'retry-after': '5' }),
+      () => json(400, { error: 'authorization_pending' }),
+      () => json(200, { api_key: KEY, token_type: 'Bearer' }),
+    ];
+    const calls = mockFetch((call) => {
+      if (call.url === 'https://api.test/v1/cli/sessions') return json(200, SESSION);
+      if (call.url === 'https://api.test/v1/cli/sessions/token') return answers.shift()?.() ?? json(500, {});
+      if (call.url === 'https://api.test/v1/me') return json(200, ME);
+      return json(404, {});
+    });
+    const cap = captureIo();
+
+    expect(await runToEnd(['login', '--no-browser'], cap.io)).toBe(0);
+
+    expect(calls.filter((c) => c.url === 'https://api.test/v1/cli/sessions/token')).toHaveLength(4);
+    expect(keychain.value).toBe(KEY);
+    expect(JSON.parse(cap.stdout)).toEqual(SIGNED_IN);
+  });
+
   it('device_login_backs_off_after_failures_and_never_sleeps_past_the_expiry', async () => {
     // RFC 8628 §3.5: slow down after a connection failure. The wait doubles after a network error or
     // a 5xx, up to 30 s, and the last wait ends when the code does.

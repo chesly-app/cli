@@ -626,6 +626,8 @@ describe('cli errors', () => {
       transcription_limit_reached: [402, 6],
       already_subscribed: [409, 1],
       terms_changed: [409, 1],
+      plan_unavailable: [503, 5],
+      plan_change_in_progress: [409, 1],
       email_send_failed: [502, 5],
       account_reconnect_required: [409, 1],
       api_paused: [503, 5],

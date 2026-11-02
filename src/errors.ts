@@ -114,6 +114,8 @@ export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; titl
   { code: 'transcription_limit_reached', status: 402, title: "This period's transcription minutes are used up." },
   { code: 'already_subscribed', status: 409, title: 'You already have an API plan.' },
   { code: 'terms_changed', status: 409, title: 'The API Terms changed.' },
+  { code: 'plan_unavailable', status: 503, title: "Your API plan can't be checked just now." },
+  { code: 'plan_change_in_progress', status: 409, title: 'A change to your plan is already under way.' },
   { code: 'email_send_failed', status: 502, title: 'The email provider refused the message.' },
   { code: 'account_reconnect_required', status: 409, title: 'This account needs to be reconnected.' },
   { code: 'api_paused', status: 503, title: 'The Chesly API is paused.' },
