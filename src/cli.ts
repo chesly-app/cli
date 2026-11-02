@@ -47,7 +47,8 @@ Exit codes:
      long (408), briefly unavailable (502, 503, 504), a first attempt still
      running (409), or a send the network didn't confirm (check the chat
      before sending again); retry_after, when there is one, says when
-  6  payment required: an API plan is needed, or a limit of the plan is reached
+  6  payment required: an API plan is needed, or this period's transcription
+     minutes are used up
 
 Examples:
   chesly catchup                       your unread chats and their latest messages

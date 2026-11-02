@@ -10,7 +10,7 @@ export const EXIT = {
    * (briefly unavailable) or a first attempt still running (409). Retry later.
    */
   RETRY_LATER: 5,
-  /** A 402: the account needs an API plan, or its plan's limits are reached. */
+  /** A 402: the account needs an API plan, or the plan's transcription minutes for the period are used up. */
   PAYMENT_REQUIRED: 6,
 } as const;
 
@@ -112,9 +112,7 @@ export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; titl
   { code: 'transcription_failed', status: 422, title: 'This voice message could not be transcribed.' },
   { code: 'key_not_found', status: 404, title: 'API key not found.' },
   { code: 'api_plan_required', status: 402, title: 'An API plan is required.' },
-  { code: 'trial_limit_reached', status: 402, title: "The trial's included usage is used up." },
-  { code: 'spend_limit_reached', status: 402, title: 'The monthly spend limit is reached.' },
-  { code: 'calls_exhausted', status: 402, title: 'The included calls and call packs are used up.' },
+  { code: 'transcription_limit_reached', status: 402, title: "This period's transcription minutes are used up." },
   { code: 'already_subscribed', status: 409, title: 'You already have an API plan.' },
   { code: 'terms_changed', status: 409, title: 'The API Terms changed.' },
   { code: 'email_send_failed', status: 502, title: 'The email provider refused the message.' },
