@@ -8,14 +8,15 @@ import { expectAnswer, isMe } from '../shapes.js';
 export function registerUsage(program: Command, io: Io): void {
   program
     .command('usage')
-    .description('Your API plan, this period\'s calls and cost, and how much each account can still send')
+    .description("Your API plan: this period's calls and minutes, its limits, and send caps")
     .addHelpText(
       'after',
       `
-Prints the API's GET /v1/me answer as JSON, or in a terminal: the plan (and
-when a trial ends), calls this period against the 50,000 included, overage
-and the estimated bill, the limit on spend beyond the plan, and each
-connected account's sends this hour and today against its caps.
+Prints the API's GET /v1/me answer as JSON, or in a terminal: the plan and
+its status (when a trial ends, when it renews or ends), this period's calls
+(counted, not billed), the transcription minutes used of those included, the
+plan's limits, and each connected account's sends this hour and today
+against its caps. Plans: https://web.chesly.app/api/billing
 
 Example:
   chesly usage --json`,

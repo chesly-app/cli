@@ -27,11 +27,16 @@ const ZAPIER_KEY = {
   last_used_at: null,
 };
 
-/** `GET /v1/me` once Wave 2 is live: the plan and the send limits. */
+/**
+ * `GET /v1/me` with R117's flat plans: the plan (PlanSummary v2), the plan's limits and the send caps.
+ * Times are at noon UTC, so they fall on the same day in any time zone.
+ */
 const ME_WAVE_2 = {
   ...ME,
   limits: {
     ...ME.limits,
+    api_keys: 25,
+    webhooks: 10,
     event_streams: 5,
     sends: [
       { account_id: WHATSAPP, network: 'whatsapp', per_hour: 60, per_day: 250, used_last_hour: 3, used_last_day: 3 },
@@ -40,20 +45,30 @@ const ME_WAVE_2 = {
   },
   usage: { period_start: '2026-10-01T00:00:00.000Z', calls: 12345 },
   plan: {
+    plan: 'pro',
     status: 'trialing',
-    trial_ends_at: '2026-11-04T09:00:00.000Z',
-    period_start: '2026-10-28T09:00:00.000Z',
-    period_end: '2026-11-28T09:00:00.000Z',
-    included_calls: 50000,
+    trial_ends_at: '2026-11-04T12:00:00.000Z',
+    period_start: '2026-10-28T12:00:00.000Z',
+    period_end: '2026-11-04T12:00:00.000Z',
+    cancel_at: null,
     calls_this_period: 12345,
-    overage_calls: 0,
     transcription_seconds_this_period: 150,
-    estimated_amount_cents: 4900,
-    spend_limit_cents: 25000,
-    billing_route: 'metered',
-    pack_balance_calls: null,
+    transcription_seconds_included: 18000,
   },
 };
+
+/** Personal's limits, as `GET /v1/me` sends them for a Personal plan or none. */
+const PERSONAL_LIMITS = { ...ME_WAVE_2.limits, requests_per_second: 5, requests_per_minute: 300, api_keys: 5, webhooks: 3 };
+
+const BILLING = 'https://web.chesly.app/api/billing';
+
+/** The plan's line of `chesly usage` in a terminal, for `plan` over ME_WAVE_2's. */
+async function planLineFor(plan: Record<string, unknown>): Promise<string | undefined> {
+  serve({ '/v1/me': () => json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, ...plan } }) });
+  const terminal = captureIo(true);
+  expect(await run(['usage'], terminal.io)).toBe(0);
+  return terminal.stdout.split('\n')[0];
+}
 
 let env: ReturnType<typeof isolateEnv>;
 
@@ -61,6 +76,9 @@ beforeEach(() => {
   env = isolateEnv();
   keychain.reset();
   vi.stubEnv('CHESLY_API_KEY', KEY);
+  // Dates read relative to today ("Nov 4"): only Date is faked, so requests run as usual.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-30T12:00:00.000Z'));
 });
 
 afterEach(() => env.cleanup());
@@ -129,76 +147,95 @@ describe('chesly keys', () => {
 });
 
 describe('chesly usage', () => {
-  it('usage_prints_plan_calls_and_send_limits', async () => {
+  it('usage_shows_the_plan_its_counted_calls_minutes_and_limits', async () => {
+    // R117: two flat plans. Calls are counted, never billed; the minutes are the plan's.
     const calls = serve({ '/v1/me': () => json(200, ME_WAVE_2) });
     const terminal = captureIo(true);
 
     expect(await run(['usage'], terminal.io)).toBe(0);
 
     expect(calls[0]?.url).toBe('https://api.test/v1/me');
-    const lines = terminal.stdout.trimEnd().split('\n');
-    expect(lines[0]).toMatch(/^Plan: trialing, the trial ends Nov 4\b/);
-    expect(lines).toContain('Calls this period: 12,345 of 50,000 included');
-    expect(lines).toContain('Overage: 0 calls · Estimate this period: $49');
-    expect(lines).toContain('Transcription this period: 3 min');
-    expect(lines).toContain('Limit beyond the plan: $250');
-    expect(lines).toContain('  whatsapp · 3/60 this hour · 3/250 today');
-    expect(lines).toContain('  telegram · 0/30 this hour · 12/150 today');
+    expect(terminal.stdout).toBe(
+      [
+        'Plan: Pro, trialing: the trial ends Nov 4',
+        'Calls this period: 12,345 (counted, not billed)',
+        'Transcription this period: 3 of 300 min',
+        'Limits: 10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams',
+        'Sends:',
+        '  whatsapp · 3/60 this hour · 3/250 today',
+        '  telegram · 0/30 this hour · 12/150 today',
+        '',
+      ].join('\n'),
+    );
+    expect(terminal.stdout).not.toMatch(/included|overage|estimate|spend|pack|\$/i);
 
-    // Cents show only when there are some; packs show what is left.
+    // Personal, renewing: its own minutes and limits.
     serve({
       '/v1/me': () =>
         json(200, {
           ...ME_WAVE_2,
+          limits: PERSONAL_LIMITS,
           plan: {
             ...ME_WAVE_2.plan,
+            plan: 'personal',
             status: 'active',
             trial_ends_at: null,
-            overage_calls: 1234,
-            estimated_amount_cents: 5023,
-            spend_limit_cents: 1000000,
-            billing_route: 'packs',
-            pack_balance_calls: 8766,
+            period_end: '2026-11-28T12:00:00.000Z',
+            transcription_seconds_this_period: 3600,
+            transcription_seconds_included: 3600,
           },
         }),
     });
-    const active = captureIo(true);
-    expect(await run(['usage'], active.io)).toBe(0);
-    expect(active.stdout).toMatch(/^Plan: active\n/);
-    expect(active.stdout).toContain('Overage: 1,234 calls · Estimate this period: $50.23\n');
-    expect(active.stdout).toContain('Call packs left: 8,766 calls\n');
-    expect(active.stdout).toContain('Limit beyond the plan: $10,000\n');
+    const personal = captureIo(true);
+    expect(await run(['usage'], personal.io)).toBe(0);
+    const lines = personal.stdout.split('\n');
+    expect(lines.slice(0, 4)).toEqual([
+      'Plan: Personal, active: it renews Nov 28',
+      'Calls this period: 12,345 (counted, not billed)',
+      'Transcription this period: 60 of 60 min',
+      'Limits: 5 requests a second, 300 a minute · 5 API keys · 3 webhooks · 5 event streams',
+    ]);
   });
 
-  it('usage_without_a_plan_says_where_to_start_one', async () => {
-    // Before the billing update, /v1/me has only the month's calls; with it, a plan of "none".
+  it('usage_says_when_a_plan_ends_and_what_to_do_when_it_stopped', async () => {
+    expect(await planLineFor({ status: 'active', trial_ends_at: null, cancel_at: '2026-11-28T12:00:00.000Z' })).toBe(
+      'Plan: Pro, active, canceled: it ends Nov 28',
+    );
+    expect(await planLineFor({ status: 'past_due', trial_ends_at: null })).toBe(
+      `Plan: Pro, past due: the last payment failed. Update the card at ${BILLING}`,
+    );
+    expect(await planLineFor({ status: 'comped', trial_ends_at: null, period_end: null })).toBe('Plan: Pro, comped');
+    expect(await planLineFor({ status: 'unpaid', trial_ends_at: null })).toBe(
+      `Plan: Pro, unpaid, so calls are refused. Pay it or update the card at ${BILLING}`,
+    );
+    expect(await planLineFor({ plan: null, status: 'none', trial_ends_at: null })).toBe(`Plan: none. Start one at ${BILLING}`);
+    expect(await planLineFor({ plan: null, status: 'canceled', trial_ends_at: null })).toBe(`Plan: canceled. Start one at ${BILLING}`);
+    // A plan this CLI doesn't know yet shows as the API names it, cleaned for the terminal.
+    expect(await planLineFor({ plan: 'team\u001b[2J', status: 'comped' })).toBe('Plan: team[2J, comped');
+
+    // Without a live plan there is no period: the month's calls, still never billed.
+    serve({ '/v1/me': () => json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, status: 'unpaid', trial_ends_at: null } }) });
+    const unpaid = captureIo(true);
+    expect(await run(['usage'], unpaid.io)).toBe(0);
+    expect(unpaid.stdout).toContain('\nCalls this month: 12,345 (counted, not billed)\n');
+    expect(unpaid.stdout).not.toContain('Calls this period');
+    expect(unpaid.stdout).not.toContain('Transcription');
+  });
+
+  it('usage_before_the_plans_shows_the_months_calls_and_the_limits_there_are', async () => {
+    // An API without a plan in /v1/me: the month's calls, and the request limits alone.
     serve({ '/v1/me': () => json(200, { ...ME, usage: { period_start: '2026-10-01T00:00:00.000Z', calls: 42 } }) });
     const before = captureIo(true);
     expect(await run(['usage'], before.io)).toBe(0);
-    expect(before.stdout).toContain('Calls this month: 42');
-
-    serve({ '/v1/me': () => json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, status: 'none', trial_ends_at: null } }) });
-    const none = captureIo(true);
-    expect(await run(['usage'], none.io)).toBe(0);
-    expect(none.stdout).toMatch(/^Plan: none\. Start one at https:\/\/web\.chesly\.app\/api\/billing\n/);
+    expect(before.stdout).toBe('Calls this month: 42 (counted, not billed)\nLimits: 10 requests a second, 600 a minute\n');
   });
 
-  it('usage_says_when_a_plan_is_unpaid_or_ends', async () => {
-    // unpaid: Stripe stopped retrying, so there is no access; cancel_at: a canceled plan's last day.
-    serve({ '/v1/me': () => json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, status: 'unpaid', trial_ends_at: null, cancel_at: null } }) });
-    const unpaid = captureIo(true);
-    expect(await run(['usage'], unpaid.io)).toBe(0);
-    expect(unpaid.stdout).toMatch(/^Plan: unpaid, so calls are refused\. Pay it or update the card at https:\/\/web\.chesly\.app\/api\/billing\n/);
-    expect(unpaid.stdout).not.toContain('Calls this period');
-
-    serve({
-      '/v1/me': () =>
-        json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, status: 'active', trial_ends_at: null, cancel_at: '2026-11-28T09:00:00.000Z' } }),
-    });
-    const ending = captureIo(true);
-    expect(await run(['usage'], ending.io)).toBe(0);
-    expect(ending.stdout).toMatch(/^Plan: active, canceled: it ends Nov 28\n/);
-    expect(ending.stdout).toContain('Calls this period: 12,345 of 50,000 included');
+  it('usage_help_names_no_prices_or_metering', async () => {
+    const help = captureIo();
+    expect(await run(['usage', '--help'], help.io)).toBe(0);
+    expect(help.stdout).toContain('counted, not billed');
+    expect(help.stdout).toContain('https://web.chesly.app/api/billing');
+    expect(help.stdout).not.toMatch(/50,000|overage|estimate|spend|pack|\$/i);
   });
 
   it('usage_json_is_the_me_answer', async () => {
@@ -209,5 +246,24 @@ describe('chesly usage', () => {
 
     expect(JSON.parse(piped.stdout)).toEqual(ME_WAVE_2);
     expect(piped.stderr).toBe('');
+  });
+});
+
+describe('chesly whoami', () => {
+  it('whoami_shows_the_key_and_the_plans_limits_in_words', async () => {
+    // The limits read as words, never JSON; the plan and the calls are chesly usage's.
+    serve({ '/v1/me': () => json(200, ME_WAVE_2) });
+    const terminal = captureIo(true);
+
+    expect(await run(['whoami'], terminal.io)).toBe(0);
+
+    const rows = terminal.stdout.trimEnd().split('\n').map((row) => row.split(/\s{2,}/));
+    expect(rows).toEqual([
+      ['Key', 'Chesly CLI on test-host (key_1)'],
+      ['Scope', 'full access'],
+      ['API version', '2026-11-01'],
+      ['Limits', '10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams'],
+      ['Using', `${KEY.slice(0, 12)}…${KEY.slice(-4)} from the CHESLY_API_KEY environment variable`],
+    ]);
   });
 });

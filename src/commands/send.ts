@@ -58,7 +58,7 @@ Prints the message the API answered: its JSON, or "Sent to <chat> · <status>"
 in a terminal. The status is queued until the network takes the message;
 with --wait the command waits up to 30 s in all for sent, delivered or failed
 (it asks once a second, or later when a refused ask's Retry-After says so,
-and each ask is a metered API call). A failure the network confirms exits 1
+and each ask counts as an API call). A failure the network confirms exits 1
 (delivery_failed) with the reason. One it didn't confirm reads "unconfirmed":
 the message may have been delivered, so check the chat before you send it
 again; --wait goes on asking, and if it stays unconfirmed the command exits 5

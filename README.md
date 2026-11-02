@@ -153,7 +153,7 @@ refused (408 `upload_timeout`), and so are the account's uploads for the next 60
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
 takes it; `--wait` checks every second (or later, when a refused check's Retry-After says so),
 within 30 seconds in all, until it is `sent`, `delivered` or `failed` (`delivered` comes only where
-the network reports it, as iMessage does; elsewhere a send ends at `sent`). Each check is a metered
+the network reports it, as iMessage does; elsewhere a send ends at `sent`). Each check counts as an
 API call. A failure the network confirms exits 1
 (`delivery_failed`) and says why. One it didn't confirm (`delivery.error.certain: false`: a timeout,
 or an error the network didn't explain) reads `unconfirmed`, because the message may have been
@@ -274,7 +274,7 @@ Check the URL, then turn the webhook back on in the dashboard at web.chesly.app/
 ```sh
 chesly keys list                 # your API keys (only their first 12 and last 4 characters)
 chesly keys revoke <key_id>      # the key stops working at its next request
-chesly usage                     # your plan, this period's calls and cost, and send caps
+chesly usage                     # your plan, this period's calls and minutes, limits and send caps
 ```
 
 New keys come from `chesly login`, or from the dashboard at https://web.chesly.app/api/keys. `keys
@@ -284,17 +284,19 @@ list` marks the key this CLI uses, and revoking it says so (run `chesly login` a
 `chesly usage` shows, in a terminal:
 
 ```
-Plan: trialing, the trial ends Nov 4
-Calls this period: 12,345 of 50,000 included
-Overage: 0 calls · Estimate this period: $49
-Transcription this period: 3 min
-Limit beyond the plan: $250
+Plan: Pro, trialing: the trial ends Nov 4
+Calls this period: 12,345 (counted, not billed)
+Transcription this period: 3 of 300 min
+Limits: 10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams
 Sends:
   whatsapp · 3/60 this hour · 3/250 today
   telegram · 0/30 this hour · 12/150 today
 ```
 
-With `--json` it prints the API's `GET /v1/me` answer.
+An API plan is a flat monthly price, Personal or Pro: calls are counted, never billed, and each plan
+has its own transcription minutes and limits (https://web.chesly.app/api/billing). The request
+limits apply to each key and to all your keys together. With `--json` it prints the API's
+`GET /v1/me` answer.
 
 ## Commands
 
@@ -302,7 +304,7 @@ With `--json` it prints the API's `GET /v1/me` answer.
 |---|---|
 | `chesly login [--key <key>\|-] [--no-browser] [--no-wait\|--wait] [--force]` | Signs in through the browser (in two steps with `--no-wait`, then `--wait`), or stores a key after checking it with `GET /v1/me`. A stored key that works means "Already signed in", unless `--force` |
 | `chesly logout` | Revokes the stored key (`DELETE /v1/keys/{key_id}`) and removes it from this computer |
-| `chesly whoami` | Shows the key in use: name, scope, API version, limits and usage (`GET /v1/me`) |
+| `chesly whoami` | Shows the key in use: name, scope, API version and the plan's limits (`GET /v1/me`) |
 | `chesly key [--reveal]` | Shows the key in use, masked (`ck_live_AbCd…WxYz`); `--reveal` prints the whole key and nothing else |
 | `chesly accounts` | Lists your connected chat accounts and their status (`GET /v1/accounts`) |
 | `chesly chats [--unread] [--account <id>] [--network <name>] [--limit <n>] [--cursor <cursor>]` | Lists your chats, pinned ones first, then the most recent (`GET /v1/chats`) |
@@ -313,7 +315,7 @@ With `--json` it prints the API's `GET /v1/me` answer.
 | `chesly watch [--chat <chat>] [--account <acct_id>] [--types <a,b>] [--networks <a,b>] [--after <evt_id>]` | Prints events as they happen, one per line (`GET /v1/events/stream`) |
 | `chesly webhooks list\|create\|delete\|rotate\|test\|deliveries` | Manages webhooks (`/v1/webhooks`) |
 | `chesly keys list\|revoke <key_id>` | Lists or revokes API keys (`/v1/keys`) |
-| `chesly usage` | Shows your plan, usage and send caps (`GET /v1/me`) |
+| `chesly usage` | Shows your plan, this period's calls (counted, not billed) and transcription minutes, the plan's limits and send caps (`GET /v1/me`) |
 
 Every command takes `--json`. `chesly <command> --help` explains each one, with an example. `--limit`
 is 1 to 100. When there is more, JSON has a `next_cursor`, and the same command with
@@ -373,7 +375,7 @@ included, on every network but email (add `--network email` for email threads):
   | 3 | not signed in (no key, a malformed one, or the key was rejected) |
   | 4 | not found (an unknown chat, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
   | 5 | not final, come back to it: rate limited (a 429: too many requests, a send cap, uploads held after a slow one, or too many open event streams), a request that took too long to arrive (a 408, such as an upload's `upload_timeout`), briefly unavailable (a 502, 503 or 504, from the API or a gateway), a first attempt still running (a 409 `idempotency_in_progress`), or a send the network didn't confirm (`delivery_unconfirmed`: check the chat before you send it again). `retry_after` says when, if the answer has it |
-  | 6 | payment required: the account needs an API plan, or a limit of its plan is reached |
+  | 6 | payment required: the account needs an API plan, or this period's transcription minutes are used up |
 
 - **MCP:** give Claude Code the Chesly MCP server with your key:
 

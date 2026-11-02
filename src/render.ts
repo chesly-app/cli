@@ -263,39 +263,84 @@ export function keyTable(keys: readonly Key[], inUse: { prefix: string; last4: s
 
 const BILLING_URL = 'https://web.chesly.app/api/billing';
 
+/** What each plan is called. A plan this CLI doesn't know yet shows as the API names it. */
+const PLAN_NAMES: ReadonlyMap<string, string> = new Map([
+  ['personal', 'Personal'],
+  ['pro', 'Pro'],
+]);
+
+/** Statuses without a period: no plan, a plan that ended, or one Stripe stopped retrying. */
+const NO_PERIOD: ReadonlySet<string> = new Set(['none', 'canceled', 'unpaid']);
+
 /**
- * `GET /v1/me` as a plan statement: the plan, this period's calls against the 50,000 included, the
- * overage and the estimate, the limit beyond the plan, then each account's send cap. Before billing
- * is live there is no plan, only the month's calls.
+ * `GET /v1/me` as a plan statement (R117): the plan, its status and the date that matters, this
+ * period's calls (counted, never billed) and transcription minutes, the plan's limits, then each
+ * account's send cap. Without a plan period, the month's calls instead.
  */
 export function usageSummary(me: Me): string {
   const lines: string[] = [];
   const plan = isRecord(me.plan) ? me.plan : undefined;
   if (plan !== undefined) lines.push(planLine(plan));
-  if (plan !== undefined && plan.status !== 'none' && plan.status !== 'canceled' && plan.status !== 'unpaid') {
-    lines.push(`Calls this period: ${count(plan.calls_this_period)} of ${count(plan.included_calls)} included`);
-    if (plan.billing_route === 'packs' && typeof plan.pack_balance_calls === 'number') {
-      lines.push(`Call packs left: ${count(plan.pack_balance_calls)} calls`);
-    }
-    lines.push(`Overage: ${count(plan.overage_calls)} calls · Estimate this period: ${dollars(plan.estimated_amount_cents)}`);
-    lines.push(`Transcription this period: ${Math.ceil(Number(plan.transcription_seconds_this_period) / 60) || 0} min`);
-    lines.push(`Limit beyond the plan: ${dollars(plan.spend_limit_cents)}`);
+  if (plan !== undefined && !NO_PERIOD.has(String(plan.status))) {
+    lines.push(`Calls this period: ${count(plan.calls_this_period)} (counted, not billed)`);
+    lines.push(`Transcription this period: ${transcriptionMinutes(plan)}`);
   } else if (isRecord(me.usage) && typeof me.usage.calls === 'number') {
-    lines.push(`Calls this month: ${count(me.usage.calls)}`);
+    lines.push(`Calls this month: ${count(me.usage.calls)} (counted, not billed)`);
   }
+  const limits = limitsLine(me.limits);
+  if (limits !== '') lines.push(`Limits: ${limits}`);
   const sends = Array.isArray(me.limits?.sends) ? me.limits.sends.filter(isSendLimit) : [];
   if (sends.length > 0) lines.push('Sends:', ...sends.map((limit) => `  ${sendLimitLine(limit, sends)}`));
   return lines.join('\n');
 }
 
+/**
+ * The plan's limits from `GET /v1/me` in words, each one the API sends: `10 requests a second, 600 a
+ * minute · 25 API keys · 10 webhooks · 5 event streams`. Empty when there are none.
+ */
+export function limitsLine(limits: unknown): string {
+  if (!isRecord(limits)) return '';
+  const perSecond = limitOf(limits.requests_per_second);
+  const perMinute = limitOf(limits.requests_per_minute);
+  const keys = limitOf(limits.api_keys);
+  const webhooks = limitOf(limits.webhooks);
+  const streams = limitOf(limits.event_streams);
+  const parts: string[] = [];
+  if (perSecond !== undefined) {
+    parts.push(`${amount(perSecond, 'request', 'requests')} a second${perMinute === undefined ? '' : `, ${count(perMinute)} a minute`}`);
+  } else if (perMinute !== undefined) {
+    parts.push(`${amount(perMinute, 'request', 'requests')} a minute`);
+  }
+  if (keys !== undefined) parts.push(amount(keys, 'API key', 'API keys'));
+  if (webhooks !== undefined) parts.push(amount(webhooks, 'webhook', 'webhooks'));
+  if (streams !== undefined) parts.push(amount(streams, 'event stream', 'event streams'));
+  return parts.join(' · ');
+}
+
+/**
+ * The plan's name and status, with the date that matters (the trial's end, the renewal, or when a
+ * canceled plan ends), and where to act on a plan that stopped.
+ */
 function planLine(plan: PlanSummary): string {
-  const status = oneLine(String(plan.status), 20);
+  const status = oneLine(String(plan.status), 20).replaceAll('_', ' ');
   if (plan.status === 'none' || plan.status === 'canceled') return `Plan: ${status}. Start one at ${BILLING_URL}`;
-  if (plan.status === 'unpaid') return `Plan: unpaid, so calls are refused. Pay it or update the card at ${BILLING_URL}`;
+  const name = typeof plan.plan === 'string' ? (PLAN_NAMES.get(plan.plan) ?? oneLine(plan.plan, 20)) : undefined;
+  const named = name === undefined ? `Plan: ${status}` : `Plan: ${name}, ${status}`;
+  if (plan.status === 'unpaid') return `${named}, so calls are refused. Pay it or update the card at ${BILLING_URL}`;
   const ends = formatWhen(plan.cancel_at);
-  if (ends !== '') return `Plan: ${status.replaceAll('_', ' ')}, canceled: it ends ${ends}`;
+  if (ends !== '') return `${named}, canceled: it ends ${ends}`;
+  if (plan.status === 'past_due') return `${named}: the last payment failed. Update the card at ${BILLING_URL}`;
   const trialEnds = plan.status === 'trialing' ? formatWhen(plan.trial_ends_at) : '';
-  return trialEnds === '' ? `Plan: ${status.replaceAll('_', ' ')}` : `Plan: ${status}, the trial ends ${trialEnds}`;
+  if (trialEnds !== '') return `${named}: the trial ends ${trialEnds}`;
+  const renews = plan.status === 'active' ? formatWhen(plan.period_end) : '';
+  return renews === '' ? named : `${named}: it renews ${renews}`;
+}
+
+/** `3 of 300 min`: used of the period's included minutes, rounded up as the dashboard does; `3 min` with none included. */
+function transcriptionMinutes(plan: PlanSummary): string {
+  const used = count(Math.ceil(Number(plan.transcription_seconds_this_period) / 60) || 0);
+  const included = Number(plan.transcription_seconds_included);
+  return included > 0 ? `${used} of ${count(Math.ceil(included / 60))} min` : `${used} min`;
 }
 
 /** `whatsapp · 3/60 this hour · 3/250 today`, naming the account when one network has several. */
@@ -310,11 +355,14 @@ function count(value: unknown): string {
   return Number(value ?? 0).toLocaleString('en-US');
 }
 
-/** `$49`, `$50.23`, `$10,000`: cents only when there are some. */
-function dollars(cents: unknown): string {
-  const amount = Number(cents ?? 0);
-  const digits = amount % 100 === 0 ? 0 : 2;
-  return `$${(amount / 100).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+/** A limit the API sent: a number, whole and not negative. */
+function limitOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/** `1 webhook`, `10 webhooks`. */
+function amount(value: number, one: string, many: string): string {
+  return `${count(value)} ${value === 1 ? one : many}`;
 }
 
 /** Oldest first. The API sends newest first, so reversing keeps messages sent in the same instant in order. */

@@ -14,34 +14,42 @@ export function expectAnswer<T>(answer: unknown, valid: (value: unknown) => valu
   return answer;
 }
 
-/** `GET /v1/me`. Fields beyond `key` are rendered generically, so new ones show up without a CLI release. */
+/** `GET /v1/me`. JSON mode prints all of it; a terminal shows the fields below in words. */
 export interface Me {
   key: { id: string; name: string; scope: string; api_version: string };
-  limits?: Record<string, unknown> & { sends?: unknown };
+  /** The plan's limits (R117), the event stream cap and each account's send cap. */
+  limits?: Record<string, unknown> & {
+    requests_per_second?: number;
+    requests_per_minute?: number;
+    api_keys?: number;
+    webhooks?: number;
+    event_streams?: number;
+    sends?: unknown;
+  };
+  /** This month's calls: `{ period_start, calls }`. */
   usage?: Record<string, unknown>;
-  /** The API plan, once billing is live. */
   plan?: PlanSummary;
 }
 
-/** The API plan and this period's usage, from `GET /v1/me`. Amounts are in cents. */
+/**
+ * The API plan and this period's usage, from `GET /v1/me` (v2, R117): a flat monthly plan, Personal
+ * or Pro. Calls are counted, never billed; transcription has the plan's minutes.
+ */
 export interface PlanSummary {
+  /** The plan bought; a comp reads 'pro'; null without one. */
+  plan: 'personal' | 'pro' | null;
   /** unpaid: Stripe stopped retrying the payment, and there is no access. */
   status: 'none' | 'trialing' | 'active' | 'past_due' | 'unpaid' | 'canceled' | 'comped';
   trial_ends_at: string | null;
-  /** When a canceled plan ends (the end of the period paid for); null while it renews. */
-  cancel_at?: string | null;
   period_start: string | null;
   period_end: string | null;
-  included_calls: number;
+  /** When a canceled plan ends (the end of the period paid for); null while it renews. */
+  cancel_at: string | null;
+  /** Counted, never billed. */
   calls_this_period: number;
-  overage_calls: number;
   transcription_seconds_this_period: number;
-  /** The $49 base plus overage and transcripts. */
-  estimated_amount_cents: number;
-  /** The cap on overage and transcripts, not on the base. */
-  spend_limit_cents: number;
-  billing_route: 'metered' | 'packs';
-  pack_balance_calls: number | null;
+  /** The period's minutes in seconds: 3,600 Personal, 18,000 Pro, 0 without a plan. */
+  transcription_seconds_included: number;
 }
 
 /** One connected account's send cap (`limits.sends` in `GET /v1/me`), over rolling windows. */
