@@ -296,8 +296,9 @@ Sends:
 An API plan is a flat monthly price, Personal or Pro: calls are counted, never billed, and each plan
 has its own transcription minutes and limits (https://web.chesly.app/api/billing). Minutes used
 round down, and once they're used up the line says when they come back
-(`60 of 60 min, used up until Nov 28`). The request limits apply to each key and to all your keys
-together. With `--json` it prints the API's `GET /v1/me` answer.
+(`60 of 60 min, used up until Nov 28`). A downgrade waits for the end of the period, and the plan
+line says when (`Plan: Pro, active: changes to Personal on Jan 14`). The request limits apply to
+each key and to all your keys together. With `--json` it prints the API's `GET /v1/me` answer.
 
 ## Commands
 

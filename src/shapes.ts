@@ -50,6 +50,8 @@ export interface PlanSummary {
   transcription_seconds_this_period: number;
   /** The period's minutes in seconds: 3,600 Personal, 18,000 Pro, 0 without a plan. */
   transcription_seconds_included: number;
+  /** A downgrade waiting for the period's end (R118, R119); null without one. */
+  scheduled_change: { plan: 'personal' | 'pro'; at: string } | null;
 }
 
 /** One connected account's send cap (`limits.sends` in `GET /v1/me`), over rolling windows. */

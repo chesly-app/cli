@@ -318,22 +318,39 @@ export function limitsLine(limits: unknown): string {
 }
 
 /**
- * The plan's name and status, with the date that matters (the trial's end, the renewal, or when a
- * canceled plan ends), and where to act on a plan that stopped.
+ * The plan's name and status, with the date that matters (the trial's end, a downgrade waiting for
+ * the period's end, the renewal, or when a canceled plan ends), and where to act on a plan that
+ * stopped.
  */
 function planLine(plan: PlanSummary): string {
   const status = oneLine(String(plan.status), 20).replaceAll('_', ' ');
   if (plan.status === 'none' || plan.status === 'canceled') return `Plan: ${status}. Start one at ${BILLING_URL}`;
-  const name = typeof plan.plan === 'string' ? (PLAN_NAMES.get(plan.plan) ?? oneLine(plan.plan, 20)) : undefined;
+  const name = planName(plan.plan);
   const named = name === undefined ? `Plan: ${status}` : `Plan: ${name}, ${status}`;
   if (plan.status === 'unpaid') return `${named}, so calls are refused. Pay it or update the card at ${BILLING_URL}`;
   const ends = formatWhen(plan.cancel_at);
   if (ends !== '') return `${named}, canceled: it ends ${ends}`;
   if (plan.status === 'past_due') return `${named}: the last payment failed. Update the card at ${BILLING_URL}`;
+  const change = scheduledChange(plan.scheduled_change);
   const trialEnds = plan.status === 'trialing' ? formatWhen(plan.trial_ends_at) : '';
-  if (trialEnds !== '') return `${named}: the trial ends ${trialEnds}`;
+  if (trialEnds !== '') return `${named}: the trial ends ${trialEnds}${change === '' ? '' : `; ${change}`}`;
+  if (change !== '') return `${named}: ${change}`;
   const renews = plan.status === 'active' ? formatWhen(plan.period_end) : '';
   return renews === '' ? named : `${named}: it renews ${renews}`;
+}
+
+/** `Pro`, `Personal`; a plan this CLI doesn't know yet as the API names it. */
+function planName(plan: unknown): string | undefined {
+  return typeof plan === 'string' ? (PLAN_NAMES.get(plan) ?? oneLine(plan, 20)) : undefined;
+}
+
+/** `changes to Personal on Jan 14` (`at 14:02` later today): a downgrade waiting for the period's end (R119). */
+function scheduledChange(change: unknown): string {
+  if (!isRecord(change)) return '';
+  const name = planName(change.plan);
+  const when = typeof change.at === 'string' ? formatWhen(change.at) : '';
+  if (name === undefined || when === '') return '';
+  return `changes to ${name} ${when.includes(':') ? 'at' : 'on'} ${when}`;
 }
 
 /**

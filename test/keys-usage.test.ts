@@ -54,6 +54,7 @@ const ME_WAVE_2 = {
     calls_this_period: 12345,
     transcription_seconds_this_period: 150,
     transcription_seconds_included: 18000,
+    scheduled_change: null,
   },
 };
 
@@ -195,6 +196,29 @@ describe('chesly usage', () => {
       'Transcription this period: 10 of 60 min',
       'Limits: 5 requests a second, 300 a minute · 5 API keys · 3 webhooks · 5 event streams',
     ]);
+  });
+
+  it('usage_notes_a_downgrade_waiting_for_the_periods_end', async () => {
+    // R118, R119: a downgrade applies when the period ends; until then the plan line says so.
+    const active = { status: 'active', trial_ends_at: null, period_end: '2026-11-28T12:00:00.000Z' };
+    const toPersonal = { plan: 'personal', at: '2026-11-28T12:00:00.000Z' };
+
+    expect(await planLineFor({ ...active, scheduled_change: null })).toBe('Plan: Pro, active: it renews Nov 28');
+    expect(await planLineFor({ ...active, scheduled_change: toPersonal })).toBe('Plan: Pro, active: changes to Personal on Nov 28');
+    // In a trial the change comes with the trial's end.
+    expect(await planLineFor({ scheduled_change: { plan: 'personal', at: '2026-11-04T12:00:00.000Z' } })).toBe(
+      'Plan: Pro, trialing: the trial ends Nov 4; changes to Personal on Nov 4',
+    );
+    // A plan that ends doesn't change first.
+    expect(await planLineFor({ ...active, cancel_at: '2026-11-28T12:00:00.000Z', scheduled_change: toPersonal })).toBe(
+      'Plan: Pro, active, canceled: it ends Nov 28',
+    );
+    // Due later today (half an hour from now, the same day in any time zone): the local time.
+    const later = new Date('2026-10-30T12:30:00.000Z');
+    const clock = `${String(later.getHours()).padStart(2, '0')}:${String(later.getMinutes()).padStart(2, '0')}`;
+    expect(await planLineFor({ ...active, scheduled_change: { plan: 'personal', at: later.toISOString() } })).toBe(
+      `Plan: Pro, active: changes to Personal at ${clock}`,
+    );
   });
 
   it('usage_rounds_minutes_down_and_says_when_used_up_ones_come_back', async () => {
