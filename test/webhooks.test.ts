@@ -302,9 +302,9 @@ describe('chesly webhooks', () => {
     expect(piped.stdout).toBe('');
   });
 
-  it('a_test_event_too_soon_exits_5_with_the_apis_detail_and_is_asked_once', async () => {
-    // One test event a webhook every 10 s (R107): the API's detail says when, and the CLI doesn't
-    // ask again by itself.
+  it('a_test_event_too_soon_is_asked_again_after_its_retry_after_then_exits_5', async () => {
+    // One test event a webhook every 10 s (R107): the CLI asks again after the Retry-After, with the
+    // same key, twice; still refused, it exits 5 with the API's detail, which says when.
     vi.useFakeTimers();
     const path = `/v1/webhooks/${ORDERS.id}/test`;
     const tooSoon = {
@@ -325,13 +325,15 @@ describe('chesly webhooks', () => {
     expect(await runToEnd(['webhooks', 'test', ORDERS.id], terminal.io)).toBe(5);
     expect(terminal.stderr).toBe('Error: One test event a webhook every 10 seconds. Retry in 7 s. (request req_test)\n');
     expect(terminal.stdout).toBe('');
-    expect(posts(calls, path)).toHaveLength(1);
+    const tries = posts(calls, path);
+    expect(tries.map((call) => call.at - (tries[0]?.at ?? 0))).toEqual([0, 7000, 14000]);
+    expect(new Set(tries.map((call) => call.headers['idempotency-key'])).size).toBe(1);
 
     calls = serve({ [path]: refuse });
     const piped = captureIo();
     expect(await runToEnd(['webhooks', 'test', ORDERS.id], piped.io)).toBe(5);
     expect(JSON.parse(piped.stderr)).toEqual(tooSoon);
-    expect(posts(calls, path)).toHaveLength(1);
+    expect(posts(calls, path)).toHaveLength(3);
   });
 
   it('server_text_in_results_and_notes_is_cleaned_for_the_terminal', async () => {

@@ -66,8 +66,10 @@ again; --wait goes on asking, and if it stays unconfirmed the command exits 5
 following it failing is only a warning on stderr (delivery_wait_failed).
 
 Every send carries an Idempotency-Key, and the CLI's own retries (after a
-network error, a 502, 503 or 504, or while a first attempt is still running)
-reuse it, so the message goes out at most once. To retry later without
+network error, a 502, 503 or 504, a 429, or while a first attempt is still
+running) reuse it, so the message goes out at most once. Each waits for the
+answer's Retry-After, at most 10 s, or 1 s and then 2 s without one; a 429
+that lifts later (a send cap) exits 5 at once. To retry later without
 sending twice, pass the same --idempotency-key again. A file send that gives
 up also names its upload: retry it with --media-id <id> instead of --file, as
 a new upload would make another media ID, which the same key refuses (422).

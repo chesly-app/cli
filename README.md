@@ -172,15 +172,16 @@ Automation can get an account restricted by its network, a LinkedIn account in p
 is why the caps exist. `chesly usage` shows how much each account has left.
 
 **Sending at most once.** Every send carries an `Idempotency-Key`: a new one per run unless you pass
-`--idempotency-key <key>`. The CLI retries a network error or a 502, 503 or 504 (twice, after 1
-and 2 seconds), and asks again while a first attempt is still running (409
-`idempotency_in_progress`: 3 tries, 1 and then 2 seconds apart, then exit 5), always with the same
-key, so a flaky connection never sends a message twice. When it gives up without knowing whether
-the message went out, the error carries the key as `idempotency_key`: run the command again with
-`--idempotency-key <that key>`, and the API answers with the first attempt's result instead of
-sending again. A file send's error also carries its upload as `media_id`: retry with
-`--media-id <that id>` instead of `--file`, since a new upload would be a new media ID, which the
-same key refuses (422 `idempotency_key_reused`).
+`--idempotency-key <key>`. The CLI retries a network error, a 502, 503 or 504, or a 429 (twice),
+and asks again while a first attempt is still running (409 `idempotency_in_progress`: 3 tries,
+then exit 5), always with the same key, so a flaky connection never sends a message twice. Each
+retry waits for the answer's `Retry-After`, at most 10 seconds, or 1 and then 2 seconds without one;
+a 429 that lifts later than that (a send cap, say) exits 5 at once, with `retry_after`. When it
+gives up without knowing whether the message went out, the error carries the key as
+`idempotency_key`: run the command again with `--idempotency-key <that key>`, and the API answers
+with the first attempt's result instead of sending again. A file send's error also carries its
+upload as `media_id`: retry with `--media-id <that id>` instead of `--file`, since a new upload
+would be a new media ID, which the same key refuses (422 `idempotency_key_reused`).
 
 ## Watch events
 

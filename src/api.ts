@@ -161,23 +161,26 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
   return parsed as T;
 }
 
-/** The waits before a POST's next attempt after a network error or a 502, 503 or 504: 1 s, then 2 s. */
+/** A POST's waits before its next attempt when the answer gives no Retry-After: 1 s, then 2 s. */
 const RETRY_DELAYS_MS = [1000, 2000];
+/** The longest a POST waits before asking again, whatever the Retry-After. */
+const MAX_RETRY_WAIT_S = 10;
 /** A POST gives up at the third answer saying its first attempt is still running. */
 const MAX_IN_PROGRESS = 3;
-/** The longest wait between those tries. */
-const MAX_IN_PROGRESS_WAIT_S = 10;
 
 /**
  * POSTs `body` with `Idempotency-Key: <idempotencyKey>` and retries with the same key, so the API
- * acts at most once however often the request goes out:
- * - after a network error or a 502, 503 or 504: up to 2 more attempts, 1 s and then 2 s later;
- * - after a 409 `idempotency_in_progress` (the first attempt is still running): 3 tries in all, 1 s
- *   and then 2 s apart, or the answer's Retry-After when longer. Asking again replays the first
- *   attempt's answer once there is one, or takes over its work.
+ * acts at most once however often the request goes out. Each wait is the answer's Retry-After when it
+ * has one, at most 10 s, else 1 s and then 2 s:
+ * - after a network error, a 502, 503 or 504, or a 429: up to 2 more attempts. A 429 whose
+ *   Retry-After is longer than 10 s isn't asked again: a limit lifts when it says, so asking sooner
+ *   would be refused for sure;
+ * - after a 409 `idempotency_in_progress` (the first attempt is still running): 3 tries in all.
+ *   Asking again replays the first attempt's answer once there is one, or takes over its work.
  * Giving up without knowing what happened, it adds the key to the error (`idempotency_key`) and says
  * how to ask again with it. `again` changes that: the flags to run the command again with, and more
- * members (a send that uploaded a file asks again with `--media-id`, never a second upload).
+ * members (a send that uploaded a file asks again with `--media-id`, never a second upload). A 429
+ * it gives up on stays as the API sent it: nothing was done.
  */
 export async function idempotentPost<T>(
   path: string,
@@ -209,22 +212,37 @@ export async function idempotentPost<T>(
             `The first attempt is still running. Run the command again with ${flags} to see its result.`,
           );
         }
-        const backoff = 2 ** (inProgress - 1);
-        await sleep(Math.min(Math.max(error.retryAfter ?? 1, backoff), MAX_IN_PROGRESS_WAIT_S) * 1000);
+        await sleep(retryWaitMs(error, inProgress - 1));
         continue;
       }
-      if (!isTransient(error)) throw error;
-      const delay = RETRY_DELAYS_MS[failures++];
-      if (delay === undefined) {
+      if (!isShortLimit(error) && !isTransient(error)) throw error;
+      if (failures >= RETRY_DELAYS_MS.length) {
+        if (isShortLimit(error)) throw error;
         throw new AnnotatedError(
           error,
           extras,
           `It may have gone through. To retry without repeating it, run the command again with ${flags}.`,
         );
       }
-      await sleep(delay);
+      await sleep(retryWaitMs(error, failures++));
     }
   }
+}
+
+/** The wait before asking again: the answer's Retry-After, at most 10 s, when it has one; else 1 s, then 2 s. */
+function retryWaitMs(error: unknown, retried: number): number {
+  const retryAfter = error instanceof CheslyApiError ? error.retryAfter : undefined;
+  if (retryAfter !== undefined) return Math.min(retryAfter, MAX_RETRY_WAIT_S) * 1000;
+  return RETRY_DELAYS_MS[Math.min(retried, RETRY_DELAYS_MS.length - 1)] ?? 0;
+}
+
+/** A 429 that lifts within a retry's wait: without a Retry-After, or with one of at most 10 s. */
+function isShortLimit(error: unknown): error is CheslyApiError {
+  return (
+    error instanceof CheslyApiError &&
+    error.status === 429 &&
+    (error.retryAfter === undefined || error.retryAfter <= MAX_RETRY_WAIT_S)
+  );
 }
 
 /** No answer, or a "try again" from the API or its gateway (502, 503, 504): asking again may work. */

@@ -251,9 +251,46 @@ describe('chesly send', () => {
     const key = attempts[0]?.headers['idempotency-key'];
     expect(key).toMatch(UUID);
     for (const attempt of attempts) expect(attempt.headers['idempotency-key']).toBe(key);
-    // 1 s after the network error, then 2 s after the 503.
-    expect(attempts.map((attempt) => attempt.at - (attempts[0]?.at ?? 0))).toEqual([0, 1000, 3000]);
+    // 1 s after the network error (no Retry-After), then the 503's Retry-After: 5 s.
+    expect(attempts.map((attempt) => attempt.at - (attempts[0]?.at ?? 0))).toEqual([0, 1000, 6000]);
     expect(JSON.parse(cap.stdout)).toEqual(sent('queued'));
+  });
+
+  it('a_retry_waits_for_the_retry_after_at_most_10_s', async () => {
+    // Asked again with the same key, after the answer's Retry-After when it has one, at most 10 s;
+    // without one, 1 s and then 2 s. A 429 the same.
+    vi.useFakeTimers();
+    const refusal = (status: number, code: string, seconds?: number) => () =>
+      problem(status, code, {}, seconds === undefined ? {} : { 'retry-after': String(seconds) });
+    const timeline = async (refused: () => Response) => {
+      const calls = serve({ [SEND_PATH]: inTurn(refused, refused, () => json(201, sent('queued'))) });
+      expect(await runToEnd(['send', MOM.id, 'On my way'], captureIo().io)).toBe(0);
+      const attempts = sends(calls);
+      expect(new Set(attempts.map((attempt) => attempt.headers['idempotency-key'])).size).toBe(1);
+      return attempts.map((attempt) => attempt.at - (attempts[0]?.at ?? 0));
+    };
+
+    expect(await timeline(refusal(503, 'upstream_unavailable', 5))).toEqual([0, 5000, 10000]);
+    expect(await timeline(refusal(503, 'upstream_unavailable', 30))).toEqual([0, 10000, 20000]);
+    expect(await timeline(refusal(503, 'upstream_unavailable'))).toEqual([0, 1000, 3000]);
+    expect(await timeline(refusal(429, 'rate_limited', 5))).toEqual([0, 5000, 10000]);
+    expect(await timeline(refusal(429, 'rate_limited'))).toEqual([0, 1000, 3000]);
+  });
+
+  it('a_429_that_lifts_later_than_a_retry_waits_exits_5_at_once', async () => {
+    // A limit's Retry-After is when it lifts: asking again within 10 s would be refused for sure.
+    vi.useFakeTimers();
+    const calls = serve({
+      [SEND_PATH]: () =>
+        new Response(JSON.stringify({ ...problemBody(429, 'rate_limited'), retry_after: 30 }), {
+          status: 429,
+          headers: { 'content-type': 'application/problem+json', 'retry-after': '30' },
+        }),
+    });
+    const piped = captureIo();
+    expect(await runToEnd(['send', MOM.id, 'hi'], piped.io)).toBe(5);
+    expect(sends(calls)).toHaveLength(1);
+    expect(JSON.parse(piped.stderr)).toMatchObject({ code: 'rate_limited', retry_after: 30 });
   });
 
   it('gives_up_after_two_retries_and_names_the_key_to_retry_with', async () => {
@@ -289,8 +326,8 @@ describe('chesly send', () => {
     const attempts = sends(calls);
     expect(attempts).toHaveLength(3);
     expect(new Set(attempts.map((attempt) => attempt.headers['idempotency-key'])).size).toBe(1);
-    // Backing off: 1 s, then 2 s (or the answer's Retry-After, when longer).
-    expect(attempts.map((attempt) => attempt.at - (attempts[0]?.at ?? 0))).toEqual([0, 1000, 3000]);
+    // Each time the answer's Retry-After: 1 s.
+    expect(attempts.map((attempt) => attempt.at - (attempts[0]?.at ?? 0))).toEqual([0, 1000, 2000]);
   });
 
   it('three_409s_exit_5_with_the_run_again_message', async () => {
