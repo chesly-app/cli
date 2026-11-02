@@ -79,7 +79,6 @@ export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; titl
   { code: 'invalid_request', status: 400, title: 'The request is not valid.' },
   { code: 'insufficient_scope', status: 403, title: 'This API key does not allow this request.' },
   { code: 'account_not_found', status: 404, title: 'Account not found.' },
-  { code: 'ambiguous_account', status: 400, title: "This account's chats can't be told apart yet." },
   { code: 'chat_not_found', status: 404, title: 'Chat not found.' },
   { code: 'message_not_found', status: 404, title: 'Message not found.' },
   { code: 'media_not_found', status: 404, title: 'Media not found.' },

@@ -228,9 +228,6 @@ const CLI_WORDING: Readonly<Record<string, { message?: string; hint: string }>> 
   chat_not_found: { hint: 'chesly chats lists your chats (email threads with --network email).' },
   account_not_found: { hint: 'chesly accounts lists your accounts.' },
   message_not_found: { hint: "chesly read <chat> shows a chat's messages with their IDs." },
-  ambiguous_account: {
-    hint: "Leave out --account: you have more than one account on this network, and their chats can't be told apart yet.",
-  },
   account_reconnect_required: {
     hint: "Chesly can't sign in to that email account. Reconnect it in the Chesly app; chesly accounts shows its status.",
   },

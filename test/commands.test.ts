@@ -351,15 +351,6 @@ describe('in a terminal', () => {
         hint: /^chesly accounts lists your accounts/m,
       },
       {
-        args: ['chats', '--account', WHATSAPP],
-        status: 400,
-        code: 'ambiguous_account',
-        title: "This account's chats can't be told apart yet.",
-        detail: "You have more than one account on this network, and Chesly can't yet tell their chats apart. Leave out account_id.",
-        message: "This account's chats can't be told apart yet.",
-        hint: /^Leave out --account/m,
-      },
-      {
         args: ['read', 'chat_Em4iLtHr3adX9qP2vK7s'],
         status: 409,
         code: 'account_reconnect_required',
@@ -600,7 +591,6 @@ describe('cli errors', () => {
       invalid_request: [400, 2],
       insufficient_scope: [403, 1],
       account_not_found: [404, 4],
-      ambiguous_account: [400, 1],
       chat_not_found: [404, 4],
       message_not_found: [404, 4],
       media_not_found: [404, 4],
