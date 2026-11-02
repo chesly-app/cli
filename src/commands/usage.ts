@@ -14,9 +14,10 @@ export function registerUsage(program: Command, io: Io): void {
       `
 Prints the API's GET /v1/me answer as JSON, or in a terminal: the plan and
 its status (when a trial ends, when it renews or ends), this period's calls
-(counted, not billed), the transcription minutes used of those included, the
-plan's limits, and each connected account's sends this hour and today
-against its caps. Plans: https://web.chesly.app/api/billing
+(counted, not billed), the transcription minutes used of those included (and,
+once they're used up, when they come back), the plan's limits, and each
+connected account's sends this hour and today against its caps.
+Plans: https://web.chesly.app/api/billing
 
 Example:
   chesly usage --json`,

@@ -336,11 +336,20 @@ function planLine(plan: PlanSummary): string {
   return renews === '' ? named : `${named}: it renews ${renews}`;
 }
 
-/** `3 of 300 min`: used of the period's included minutes, rounded up as the dashboard does; `3 min` with none included. */
+/**
+ * `59 of 60 min`: the minutes used of the period's included ones, rounded down, so the cap shows
+ * only once it is reached. At or past it (one note may run past the line), when they come back:
+ * `60 of 60 min, used up until Nov 28`. `2 min` when none are included.
+ */
 function transcriptionMinutes(plan: PlanSummary): string {
-  const used = count(Math.ceil(Number(plan.transcription_seconds_this_period) / 60) || 0);
+  const usedSeconds = Number(plan.transcription_seconds_this_period) || 0;
+  const used = count(Math.floor(usedSeconds / 60));
   const included = Number(plan.transcription_seconds_included);
-  return included > 0 ? `${used} of ${count(Math.ceil(included / 60))} min` : `${used} min`;
+  if (!(included > 0)) return `${used} min`;
+  const minutes = `${used} of ${count(Math.floor(included / 60))} min`;
+  if (usedSeconds < included) return minutes;
+  const back = formatWhen(plan.period_end);
+  return back === '' ? `${minutes}, used up` : `${minutes}, used up until ${back}`;
 }
 
 /** `whatsapp · 3/60 this hour · 3/250 today`, naming the account when one network has several. */

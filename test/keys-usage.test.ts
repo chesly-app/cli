@@ -159,7 +159,7 @@ describe('chesly usage', () => {
       [
         'Plan: Pro, trialing: the trial ends Nov 4',
         'Calls this period: 12,345 (counted, not billed)',
-        'Transcription this period: 3 of 300 min',
+        'Transcription this period: 2 of 300 min',
         'Limits: 10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams',
         'Sends:',
         '  whatsapp · 3/60 this hour · 3/250 today',
@@ -181,7 +181,7 @@ describe('chesly usage', () => {
             status: 'active',
             trial_ends_at: null,
             period_end: '2026-11-28T12:00:00.000Z',
-            transcription_seconds_this_period: 3600,
+            transcription_seconds_this_period: 600,
             transcription_seconds_included: 3600,
           },
         }),
@@ -192,9 +192,38 @@ describe('chesly usage', () => {
     expect(lines.slice(0, 4)).toEqual([
       'Plan: Personal, active: it renews Nov 28',
       'Calls this period: 12,345 (counted, not billed)',
-      'Transcription this period: 60 of 60 min',
+      'Transcription this period: 10 of 60 min',
       'Limits: 5 requests a second, 300 a minute · 5 API keys · 3 webhooks · 5 event streams',
     ]);
+  });
+
+  it('usage_rounds_minutes_down_and_says_when_used_up_ones_come_back', async () => {
+    // The minutes used round down, so the cap shows only once it's reached; from then on the line
+    // says when they come back (period_end). One note may run past the cap.
+    const personal = { plan: 'personal', status: 'active', trial_ends_at: null, period_end: '2026-11-28T12:00:00.000Z' };
+    const minutesFor = async (plan: Record<string, unknown>) => {
+      serve({ '/v1/me': () => json(200, { ...ME_WAVE_2, plan: { ...ME_WAVE_2.plan, ...personal, ...plan } }) });
+      const terminal = captureIo(true);
+      expect(await run(['usage'], terminal.io)).toBe(0);
+      return terminal.stdout.split('\n').find((line) => line.startsWith('Transcription'));
+    };
+
+    expect(await minutesFor({ transcription_seconds_this_period: 3599, transcription_seconds_included: 3600 })).toBe(
+      'Transcription this period: 59 of 60 min',
+    );
+    expect(await minutesFor({ transcription_seconds_this_period: 3600, transcription_seconds_included: 3600 })).toBe(
+      'Transcription this period: 60 of 60 min, used up until Nov 28',
+    );
+    expect(await minutesFor({ transcription_seconds_this_period: 3700, transcription_seconds_included: 3600 })).toBe(
+      'Transcription this period: 61 of 60 min, used up until Nov 28',
+    );
+    expect(
+      await minutesFor({ status: 'comped', transcription_seconds_this_period: 18000, transcription_seconds_included: 18000, period_end: null }),
+    ).toBe('Transcription this period: 300 of 300 min, used up');
+    // None included (no cap while billing is off): the minutes used alone.
+    expect(await minutesFor({ transcription_seconds_this_period: 150, transcription_seconds_included: 0 })).toBe(
+      'Transcription this period: 2 min',
+    );
   });
 
   it('usage_says_when_a_plan_ends_and_what_to_do_when_it_stopped', async () => {
