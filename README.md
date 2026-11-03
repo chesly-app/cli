@@ -189,7 +189,7 @@ would be a new media ID, which the same key refuses (422 `idempotency_key_reused
 chesly watch --json                                   # every event, one JSON object a line
 chesly watch --chat "Mom" --types message.received    # one chat, one type
 chesly watch --networks email                          # email events (left out otherwise)
-chesly watch --after evt_...                           # from a past event (kept 4 days)
+chesly watch --after evt_...                           # from a past event (within your plan's event history)
 ```
 
 `watch` prints events as they happen, until Ctrl+C (exit 0). In JSON mode each line is an event as
@@ -217,8 +217,10 @@ turns out certain, a second `message.delivery_failed` for the same message follo
 true`. The wait between tries keeps growing while connections drop before
 delivering any event. An event too large to read (a line over 1 MiB, or over 4 MiB in all) ends the
 connection; if the same one does so twice in a row, `watch` resumes after it and warns
-`event_too_large` with its ID. A resume point older than 4 days starts again from new events, with
-a warning on stderr. Each user can have 5 streams open at once; a sixth exits 5.
+`event_too_large` with its ID. A resume point older than your plan's event history starts again
+from new events, with a warning on stderr. How many days of events your plan keeps, and how many
+streams you can have open at once, are the plan's (`chesly usage` shows both); one stream more
+exits 5 (`too_many_streams`).
 
 ## Webhooks
 
@@ -287,8 +289,8 @@ list` marks the key this CLI uses, and revoking it says so (run `chesly login` a
 ```
 Plan: Pro, trialing: the trial ends Nov 4
 Calls this period: 12,345 (counted, not billed)
-Transcription this period: 3 of 300 min
-Limits: 10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams
+Transcription this period: 3 of 3,000 min
+Limits: 30 requests a second, 1,800 a minute · 100 API keys · 100 webhooks · 25 event streams · 30 days of event history
 Sends:
   whatsapp · 3/60 this hour · 3/250 today
   telegram · 0/30 this hour · 12/150 today
@@ -297,7 +299,7 @@ Sends:
 An API plan is a flat monthly price, Personal or Pro: calls are counted, never billed, and each plan
 has its own transcription minutes and limits (https://web.chesly.app/api/billing). Minutes used
 round down, and once they're used up the line says when they come back
-(`60 of 60 min, used up until Nov 28`). A downgrade waits for the end of the period, and the plan
+(`600 of 600 min, used up until Nov 28`). A downgrade waits for the end of the period, and the plan
 line says when (`Plan: Pro, active: changes to Personal on Jan 14`). The request limits apply to
 each key and to all your keys together. With `--json` it prints the API's `GET /v1/me` answer.
 

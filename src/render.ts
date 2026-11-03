@@ -295,8 +295,9 @@ export function usageSummary(me: Me): string {
 }
 
 /**
- * The plan's limits from `GET /v1/me` in words, each one the API sends: `10 requests a second, 600 a
- * minute · 25 API keys · 10 webhooks · 5 event streams`. Empty when there are none.
+ * The plan's limits from `GET /v1/me` in words, each one the API sends: `30 requests a second, 1,800
+ * a minute · 100 API keys · 100 webhooks · 25 event streams · 30 days of event history`. Empty when
+ * there are none.
  */
 export function limitsLine(limits: unknown): string {
   if (!isRecord(limits)) return '';
@@ -305,6 +306,7 @@ export function limitsLine(limits: unknown): string {
   const keys = limitOf(limits.api_keys);
   const webhooks = limitOf(limits.webhooks);
   const streams = limitOf(limits.event_streams);
+  const history = limitOf(limits.event_retention_days);
   const parts: string[] = [];
   if (perSecond !== undefined) {
     parts.push(`${amount(perSecond, 'request', 'requests')} a second${perMinute === undefined ? '' : `, ${count(perMinute)} a minute`}`);
@@ -314,6 +316,7 @@ export function limitsLine(limits: unknown): string {
   if (keys !== undefined) parts.push(amount(keys, 'API key', 'API keys'));
   if (webhooks !== undefined) parts.push(amount(webhooks, 'webhook', 'webhooks'));
   if (streams !== undefined) parts.push(amount(streams, 'event stream', 'event streams'));
+  if (history !== undefined) parts.push(`${amount(history, 'day', 'days')} of event history`);
   return parts.join(' · ');
 }
 

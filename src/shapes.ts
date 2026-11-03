@@ -17,13 +17,15 @@ export function expectAnswer<T>(answer: unknown, valid: (value: unknown) => valu
 /** `GET /v1/me`. JSON mode prints all of it; a terminal shows the fields below in words. */
 export interface Me {
   key: { id: string; name: string; scope: string; api_version: string };
-  /** The plan's limits (R117), the event stream cap and each account's send cap. */
+  /** The plan's limits (R117, R124), its event streams and history, and each account's send cap. */
   limits?: Record<string, unknown> & {
     requests_per_second?: number;
     requests_per_minute?: number;
     api_keys?: number;
     webhooks?: number;
     event_streams?: number;
+    /** How many days of events the plan keeps (R124: 7, or 30 on Pro). */
+    event_retention_days?: number;
     sends?: unknown;
   };
   /** This month's calls: `{ period_start, calls }`. */

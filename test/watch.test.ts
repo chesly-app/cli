@@ -277,6 +277,17 @@ describe('chesly watch', () => {
     terminal.interrupt();
     expect(await terminalExit).toBe(0);
     expect(terminal.stderr).toMatch(/^Events after evt_too_old are no longer kept/);
+    // How long events are kept is the plan's (R124), never a fixed number of days.
+    expect(terminal.stderr).toContain("your plan's event history");
+    expect(terminal.stderr).not.toMatch(/\d+ days/);
+  });
+
+  it('watch_help_says_the_event_history_and_streams_are_the_plans', async () => {
+    const help = captureIo();
+    expect(await run(['watch', '--help'], help.io)).toBe(0);
+    expect(help.stdout).toContain("your plan's event history");
+    expect(help.stdout).toContain('chesly usage');
+    expect(help.stdout).not.toMatch(/\b\d+ days\b|\b\d+ streams\b/);
   });
 
   it('too_many_streams_exits_5', async () => {

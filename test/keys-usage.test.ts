@@ -38,6 +38,7 @@ const ME_WAVE_2 = {
     api_keys: 25,
     webhooks: 10,
     event_streams: 5,
+    event_retention_days: 30,
     sends: [
       { account_id: WHATSAPP, network: 'whatsapp', per_hour: 60, per_day: 250, used_last_hour: 3, used_last_day: 3 },
       { account_id: null, network: 'telegram', per_hour: 30, per_day: 150, used_last_hour: 0, used_last_day: 12 },
@@ -59,7 +60,14 @@ const ME_WAVE_2 = {
 };
 
 /** Personal's limits, as `GET /v1/me` sends them for a Personal plan or none. */
-const PERSONAL_LIMITS = { ...ME_WAVE_2.limits, requests_per_second: 5, requests_per_minute: 300, api_keys: 5, webhooks: 3 };
+const PERSONAL_LIMITS = {
+  ...ME_WAVE_2.limits,
+  requests_per_second: 5,
+  requests_per_minute: 300,
+  api_keys: 5,
+  webhooks: 3,
+  event_retention_days: 7,
+};
 
 const BILLING = 'https://web.chesly.app/api/billing';
 
@@ -161,7 +169,7 @@ describe('chesly usage', () => {
         'Plan: Pro, trialing: the trial ends Nov 4',
         'Calls this period: 12,345 (counted, not billed)',
         'Transcription this period: 2 of 300 min',
-        'Limits: 10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams',
+        'Limits: 10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams · 30 days of event history',
         'Sends:',
         '  whatsapp · 3/60 this hour · 3/250 today',
         '  telegram · 0/30 this hour · 12/150 today',
@@ -194,7 +202,7 @@ describe('chesly usage', () => {
       'Plan: Personal, active: it renews Nov 28',
       'Calls this period: 12,345 (counted, not billed)',
       'Transcription this period: 10 of 60 min',
-      'Limits: 5 requests a second, 300 a minute · 5 API keys · 3 webhooks · 5 event streams',
+      'Limits: 5 requests a second, 300 a minute · 5 API keys · 3 webhooks · 5 event streams · 7 days of event history',
     ]);
   });
 
@@ -283,6 +291,21 @@ describe('chesly usage', () => {
     expect(before.stdout).toBe('Calls this month: 42 (counted, not billed)\nLimits: 10 requests a second, 600 a minute\n');
   });
 
+  it('limits_name_the_event_history_only_when_the_api_sends_it', async () => {
+    // R124: how many days of events the plan keeps. Until the API sends it, the line goes without.
+    const limitsLineFor = async (limits: Record<string, unknown>) => {
+      serve({ '/v1/me': () => json(200, { ...ME_WAVE_2, limits }) });
+      const terminal = captureIo(true);
+      expect(await run(['usage'], terminal.io)).toBe(0);
+      return terminal.stdout.split('\n').find((line) => line.startsWith('Limits:'));
+    };
+    const { event_retention_days: _days, ...before } = ME_WAVE_2.limits;
+
+    expect(await limitsLineFor(before)).toBe('Limits: 10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams');
+    expect(await limitsLineFor({ ...before, event_retention_days: 1 })).toMatch(/ · 1 day of event history$/);
+    expect(await limitsLineFor({ ...before, event_retention_days: 'a week' })).not.toContain('event history');
+  });
+
   it('usage_help_names_no_prices_or_metering', async () => {
     const help = captureIo();
     expect(await run(['usage', '--help'], help.io)).toBe(0);
@@ -315,7 +338,7 @@ describe('chesly whoami', () => {
       ['Key', 'Chesly CLI on test-host (key_1)'],
       ['Scope', 'full access'],
       ['API version', '2026-11-01'],
-      ['Limits', '10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams'],
+      ['Limits', '10 requests a second, 600 a minute · 25 API keys · 10 webhooks · 5 event streams · 30 days of event history'],
       ['Using', `${KEY.slice(0, 12)}…${KEY.slice(-4)} from the CHESLY_API_KEY environment variable`],
     ]);
   });

@@ -32,7 +32,7 @@ export function registerWatch(program: Command, io: Io): void {
     .option('--account <acct_id>', 'only this account: an acct_ ID from chesly accounts')
     .option('--types <a,b>', 'only these event types, such as message.received,message.sent', parseList)
     .option('--networks <a,b>', 'only these networks, such as whatsapp,telegram (email only when named)', parseList)
-    .option('--after <evt_id>', 'start after this event instead of now (events are kept 4 days)')
+    .option('--after <evt_id>', "start after this event instead of now (as far back as your plan's event history)")
     .addHelpText(
       'after',
       `
@@ -55,8 +55,11 @@ the stream gave: an event's, or the stream's starting point when the API names
 it. From then on nothing is missed; before it, events during a reconnect can
 be (--after <evt_id> pins the start). An event can come twice: skip ids you
 have seen. An event too large to read (over 4 MiB) that ends the connection
-twice in a row is skipped, with an event_too_large warning naming its id. A resume point older than 4 days starts over from new events, with
-a warning on stderr (a JSON line in JSON mode).
+twice in a row is skipped, with an event_too_large warning naming its id. A
+resume point older than your plan's event history starts over from new
+events, with a warning on stderr (a JSON line in JSON mode). How many days
+that is, and how many streams you can have open at once, are your plan's:
+chesly usage shows both. One stream more exits 5 (too_many_streams).
 
 Email events come only when --networks names email, or --account is an
 email account. With --networks naming one network, --chat looks its name up
@@ -146,7 +149,7 @@ async function watchEvents(
         if (error instanceof CheslyApiError && error.code === 'events_expired') {
           out.warn(
             'events_expired',
-            `Events after ${lastId ?? cursor ?? 'that point'} are no longer kept (4 days at most). Watching new events from now.`,
+            `Events after ${lastId ?? cursor ?? 'that point'} are no longer kept: they are older than your plan's event history. Watching new events from now.`,
           );
           lastId = undefined;
           cursor = undefined;
