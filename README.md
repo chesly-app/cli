@@ -408,3 +408,7 @@ npm run export-errors -- <dir>        # writes cli-errors.json, cli-warnings.jso
 
 Dependencies are pinned to exact versions, and `.npmrc` sets `min-release-age=14`, so npm never
 installs a version published in the last two weeks.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -496,9 +496,12 @@ describe('output and exit codes', () => {
 });
 
 describe('package.json', () => {
-  it('stays_private_until_launch', () => {
-    // npm refuses to publish a private package. The `chesly` name is published by hand at launch.
-    expect(pkg.private).toBe(true);
+  it('is_publishable_under_the_mit_licence', () => {
+    // Published by hand (npm publish --auth-type=web) from launch on; npm refuses a private package.
+    expect((pkg as { private?: boolean }).private).toBeUndefined();
+    expect(pkg.license).toBe('MIT');
+    expect(pkg.bin).toEqual({ chesly: 'dist/index.js' });
+    expect(pkg.files).toEqual(['dist']);
   });
 });
 

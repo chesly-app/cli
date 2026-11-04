@@ -2,8 +2,7 @@
   "name": "chesly",
   "version": "0.2.0",
   "description": "Chesly CLI: your chats from the terminal and your agents",
-  "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "chesly": "dist/index.js"
