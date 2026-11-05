@@ -11,7 +11,7 @@ export function registerKey(program: Command, io: Io): void {
       'after',
       `
 Example: add the Chesly MCP server to Claude Code
-  claude mcp add --transport http chesly https://api.chesly.app/mcp \\
+  claude mcp add --transport http chesly https://mcp.chesly.app/mcp \\
     --header "Authorization: Bearer $(chesly key --reveal)"`,
     )
     .action(async (options: { reveal?: boolean }, command: Command) => {

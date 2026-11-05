@@ -672,6 +672,20 @@ describe('cli errors', () => {
     for (const { code, title } of LOCAL_WARNING_CODES) expect(title, code).toMatch(/^[A-Z].*\.$/);
   });
 
+  it('the_mcp_examples_use_the_mcp_host', async () => {
+    // The MCP server has its own host (api.chesly.app/mcp keeps working, but isn't shown).
+    const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
+    const help = captureIo();
+    expect(await run(['key', '--help'], help.io)).toBe(0);
+    for (const [where, text] of [
+      ['README', readme],
+      ['key --help', help.stdout],
+    ] as const) {
+      expect(text, where).toContain('claude mcp add --transport http chesly https://mcp.chesly.app/mcp');
+      expect(text, where).not.toContain('api.chesly.app/mcp');
+    }
+  });
+
   it('every_send_example_passes_its_text_through_a_quoted_heredoc', async () => {
     // Inside double quotes the shell still rewrites $ and backticks; a quoted heredoc keeps the text.
     const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');

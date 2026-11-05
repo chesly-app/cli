@@ -385,7 +385,7 @@ included, on every network but email (add `--network email` for email threads):
 - **MCP:** give Claude Code the Chesly MCP server with your key:
 
   ```sh
-  claude mcp add --transport http chesly https://api.chesly.app/mcp \
+  claude mcp add --transport http chesly https://mcp.chesly.app/mcp \
     --header "Authorization: Bearer $(chesly key --reveal)"
   ```
 
