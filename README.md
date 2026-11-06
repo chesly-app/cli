@@ -108,8 +108,9 @@ chesly accounts                        # your connected accounts and their statu
 Email is left out of `chats`, `catchup` and `search` unless you ask for it with `--network email`.
 `--network` takes any one network, and on `read` and `send` it says where to look a chat name up:
 an email thread's name is its subject. The names are `whatsapp`, `telegram`, `signal`, `imessage`,
-`instagram`, `messenger`, `twitter` (X), `linkedin`, `discord`, `slack`, `reddit`, `gmessages`
-(Google Messages), `googlechat` and `email`; `chesly accounts` shows each account's.
+`instagram`, `messenger`, `line`, `twitter` (X), `linkedin`, `discord`, `slack`, `reddit`, `gmessages`
+(Google Messages), `googlechat`, `grokbot` (Grok Bot), `chatgptdots` (OpenAI Dots), `muse` and `email`,
+with `tiktok` and `wechat` coming soon; `chesly accounts` shows each account's.
 
 ```sh
 chesly chats --network email                      # your email threads
