@@ -168,10 +168,10 @@ Examples:
 }
 
 /**
- * The text to send: the argument, or all of stdin for `-` without the line breaks it ends with.
- * Undefined when there is none. `-` never reads a terminal: that would be a prompt.
+ * A message's text, for a send or an edit: the argument, or all of stdin for `-` without the line
+ * breaks it ends with. Undefined when there is none. `-` never reads a terminal: that would be a prompt.
  */
-async function messageText(text: string | undefined, io: Io): Promise<string | undefined> {
+export async function messageText(text: string | undefined, io: Io): Promise<string | undefined> {
   if (text !== '-') return text === '' ? undefined : text;
   if (io.stdin.isTTY) {
     throw new CliError(

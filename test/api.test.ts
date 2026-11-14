@@ -456,6 +456,8 @@ describe('output and exit codes', () => {
       'search',
       'catchup',
       'send',
+      'edit',
+      'delete',
       'watch',
       'webhooks',
       'keys',

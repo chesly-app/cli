@@ -30,6 +30,13 @@ export function parseNetwork(value: string): string {
   return network;
 }
 
+/** A `<message_id>` argument (`msg_…`), trimmed: a blank one is a usage error, before any request. */
+export function parseMessageId(value: string): string {
+  const id = value.trim();
+  if (id === '') throw new InvalidArgumentError('Give a message ID (msg_…).');
+  return id;
+}
+
 /** A comma-separated list such as `--types a,b`: trimmed, without empty or repeated items. */
 export function parseList(value: string): string[] {
   const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];

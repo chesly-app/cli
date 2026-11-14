@@ -608,6 +608,8 @@ describe('cli errors', () => {
       idempotency_key_reused: [422, 1],
       idempotency_in_progress: [409, 5],
       message_request: [409, 1],
+      message_not_editable: [409, 1],
+      message_not_deletable: [409, 1],
       send_limit_reached: [429, 5],
       text_too_long: [400, 1],
       invalid_reply_to: [400, 1],
@@ -686,26 +688,28 @@ describe('cli errors', () => {
     }
   });
 
-  it('every_send_example_passes_its_text_through_a_quoted_heredoc', async () => {
+  it('every_send_and_edit_example_passes_its_text_through_a_quoted_heredoc', async () => {
     // Inside double quotes the shell still rewrites $ and backticks; a quoted heredoc keeps the text.
     const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
-    const sendHelp = captureIo();
-    await run(['send', '--help'], sendHelp.io);
-    const rootHelp = captureIo();
-    await run(['--help'], rootHelp.io);
+    const help = async (...command: string[]) => {
+      const cap = captureIo();
+      await run([...command, '--help'], cap.io);
+      return cap.stdout;
+    };
     for (const [where, text] of [
       ['README', readme],
-      ['send --help', sendHelp.stdout],
-      ['--help', rootHelp.stdout],
+      ['send --help', await help('send')],
+      ['edit --help', await help('edit')],
+      ['--help', await help()],
     ] as const) {
       const examples = text
         .split('\n')
         .map((line) => line.trim())
-        .filter((line) => /^(\S.*\| *)?chesly send /.test(line));
+        .filter((line) => /^(\S.*\| *)?chesly (?:send|edit) /.test(line));
       expect(examples.length, where).toBeGreaterThan(0);
       for (const example of examples) {
         expect(example, where).toMatch(/ - .*<<'EOF'/);
-        expect(example, where).not.toMatch(/^chesly send \S+ "[^"]*"/);
+        expect(example, where).not.toMatch(/^chesly (?:send|edit) \S+ "[^"]*"/);
       }
     }
     expect(readme).toMatch(/quoted heredoc/);
@@ -714,7 +718,7 @@ describe('cli errors', () => {
   it('every_command_says_what_it_prints_with_an_example', async () => {
     const commands = [
       ['login'], ['logout'], ['whoami'], ['key'], ['accounts'], ['chats'], ['read'], ['search'], ['catchup'],
-      ['send'], ['watch'], ['webhooks', 'list'], ['webhooks', 'create'], ['webhooks', 'delete'],
+      ['send'], ['edit'], ['delete'], ['watch'], ['webhooks', 'list'], ['webhooks', 'create'], ['webhooks', 'delete'],
       ['webhooks', 'rotate'], ['webhooks', 'test'], ['webhooks', 'deliveries'], ['keys', 'list'],
       ['keys', 'revoke'], ['usage'],
     ];

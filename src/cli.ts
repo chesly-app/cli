@@ -3,6 +3,8 @@ import { VERSION } from './api.js';
 import { registerAccounts } from './commands/accounts.js';
 import { registerCatchup } from './commands/catchup.js';
 import { registerChats } from './commands/chats.js';
+import { registerDelete } from './commands/delete.js';
+import { registerEdit } from './commands/edit.js';
 import { registerKey } from './commands/key.js';
 import { registerKeys } from './commands/keys.js';
 import { registerLogin } from './commands/login.js';
@@ -95,6 +97,8 @@ function buildProgram(io: Io, json: boolean): Command {
   registerSearch(program, io);
   registerCatchup(program, io);
   registerSend(program, io);
+  registerEdit(program, io);
+  registerDelete(program, io);
   registerWatch(program, io);
   registerWebhooks(program, io);
   registerKeys(program, io);

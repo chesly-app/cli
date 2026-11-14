@@ -96,6 +96,8 @@ export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; titl
   { code: 'idempotency_key_reused', status: 422, title: 'This Idempotency-Key was used for a different request.' },
   { code: 'idempotency_in_progress', status: 409, title: 'A request with this Idempotency-Key is still running.' },
   { code: 'message_request', status: 409, title: 'This chat is a message request.' },
+  { code: 'message_not_editable', status: 409, title: "This message can't be edited." },
+  { code: 'message_not_deletable', status: 409, title: "This message can't be deleted." },
   { code: 'send_limit_reached', status: 429, title: "This account's send limit is reached." },
   { code: 'text_too_long', status: 400, title: 'The text is too long for this network.' },
   { code: 'invalid_reply_to', status: 400, title: 'reply_to must be a message in this chat.' },

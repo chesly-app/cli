@@ -4,9 +4,9 @@ Your chats from the terminal, for you and your agents. `chesly` is the command-l
 [Chesly](https://chesly.app) API. It is built for agents (Claude Code, Codex, OpenClaw) as much as
 for people: JSON when piped, stable exit codes, and it never prompts.
 
-Read your chats, send messages, follow events as they happen, and manage webhooks, on WhatsApp,
-Telegram, Signal, iMessage, Instagram, Messenger, X, LinkedIn, Discord, Slack, Reddit, Google
-Messages, Google Chat and email.
+Read your chats, send messages, edit or delete the ones you sent, follow events as they happen,
+and manage webhooks, on WhatsApp, Telegram, Signal, iMessage, Instagram, Messenger, X, LinkedIn,
+Discord, Slack, Reddit, Google Messages, Google Chat and email.
 
 ## Install
 
@@ -184,6 +184,56 @@ with the first attempt's result instead of sending again. A file send's error al
 upload as `media_id`: retry with `--media-id <that id>` instead of `--file`, since a new upload
 would be a new media ID, which the same key refuses (422 `idempotency_key_reused`).
 
+## Edit and delete messages
+
+```sh
+chesly edit msg_... - <<'EOF'        # change the text of a message you sent
+On my way, 10 minutes
+EOF
+chesly delete msg_...                # delete a message you sent, for everyone in the chat
+```
+
+Both work only on messages you sent from Chesly: its apps or the API, such as a `chesly send`,
+whose answer's `id` is the message ID. A message you sent in the network's own app (WhatsApp on
+your phone, say) is refused: Chesly can't change it on the network. So is email, which can't be
+edited or unsent. `edit` takes text messages only, not photos, videos, files, voice notes,
+stickers, locations, polls or calls. Its text comes on stdin like a send's, and the network caps it
+as it caps a send: 1,000 characters on Instagram, 2,000 on Discord, 4,096 on Telegram, 10,000
+elsewhere.
+
+Each network's time limits apply. Past them the API refuses instead of pretending, because the
+network would keep showing the old message:
+
+| Network | Edit | Delete for everyone |
+|---|---|---|
+| WhatsApp | 15 minutes | 2 days |
+| Signal | 24 hours, at most 10 edits | 24 hours |
+| Telegram | 48 hours | no limit |
+| Instagram | 15 minutes | no limit |
+| Messenger | 15 minutes | 10 minutes |
+| Google Messages | 15 minutes | 15 minutes |
+| LinkedIn | 1 hour | 1 hour |
+| iMessage | 15 minutes, at most 5 edits | 2 minutes |
+| Discord, Slack, Google Chat, TikTok | no limit | no limit |
+| X | no limit | not possible (X keeps it for the other person) |
+| OpenAI Dots | no limit | not possible |
+| WeChat | not possible | 2 minutes |
+| LINE | not possible | 24 hours |
+| Snapchat, Reddit | not possible | no limit |
+| Grok Bot, Muse | not possible | not possible |
+
+A refused edit exits 1 with `message_not_editable`, and a refused delete with
+`message_not_deletable`. The error says why: not sent from Chesly, not text, deleted, email, a
+network that takes none, or past the network's time limit, which it names.
+
+`edit` prints the edited message, with its new `text` and `edited: true`. `delete` prints
+`{"id":"msg_...","deleted":true}`, or "Deleted <id> for everyone in the chat." in a terminal. A
+deleted message can't be brought back. Both are safe to run again: editing to the text a message
+already has changes nothing, and deleting a message that is already deleted answers the same. An
+account can edit or delete as many messages an hour as it can send (60 on WhatsApp, 30 elsewhere);
+past that, the command exits 5 with `rate_limited` and `retry_after`. A read-only key can do
+neither (403 `insufficient_scope`).
+
 ## Watch events
 
 ```sh
@@ -318,6 +368,8 @@ each key and to all your keys together. With `--json` it prints the API's `GET /
 | `chesly search <query> [--chat <chat>] [--network <name>] [--limit <n>]` | Searches your messages, in every chat or one (`GET /v1/messages/search`) |
 | `chesly catchup [--chats <n>] [--per-chat <n>] [--network <name>]` | Your unread chats (not muted or archived) with their latest messages, in one call (`GET /v1/catch_up`) |
 | `chesly send <chat> [text\|-] [--reply-to <msg_id>] [--file <path>\|--media-id <id>] [--wait] [--idempotency-key <key>] [--network <name>]` | Sends a message, a reply or a file (`POST /v1/media`, `POST /v1/chats/{chat_id}/messages`) |
+| `chesly edit <message_id> <text\|->` | Changes the text of a message you sent from Chesly, for everyone in the chat (`PATCH /v1/messages/{message_id}`) |
+| `chesly delete <message_id>` | Deletes a message you sent from Chesly, for everyone in the chat (`DELETE /v1/messages/{message_id}`) |
 | `chesly watch [--chat <chat>] [--account <acct_id>] [--types <a,b>] [--networks <a,b>] [--after <evt_id>]` | Prints events as they happen, one per line (`GET /v1/events/stream`) |
 | `chesly webhooks list\|create\|delete\|rotate\|test\|deliveries` | Manages webhooks (`/v1/webhooks`) |
 | `chesly keys list\|revoke <key_id>` | Lists or revokes API keys (`/v1/keys`) |
@@ -379,7 +431,7 @@ included, on every network but email (add `--network email` for email threads):
   | 1 | error |
   | 2 | usage |
   | 3 | not signed in (no key, a malformed one, or the key was rejected) |
-  | 4 | not found (an unknown chat, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
+  | 4 | not found (an unknown chat, message, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
   | 5 | not final, come back to it: rate limited (a 429: too many requests, a send cap, uploads held after a slow one, or too many open event streams), a request that took too long to arrive (a 408, such as an upload's `upload_timeout`), briefly unavailable (a 502, 503 or 504, from the API or a gateway), a first attempt still running (a 409 `idempotency_in_progress`), or a send the network didn't confirm (`delivery_unconfirmed`: check the chat before you send it again). `retry_after` says when, if the answer has it |
   | 6 | payment required: the account needs an API plan, or this period's transcription minutes are used up |
 
