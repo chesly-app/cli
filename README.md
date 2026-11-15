@@ -193,10 +193,10 @@ EOF
 chesly delete msg_...                # delete a message you sent, for everyone in the chat
 ```
 
-Both work only on messages you sent from Chesly: its apps or the API, such as a `chesly send`,
-whose answer's `id` is the message ID. A message you sent in the network's own app (WhatsApp on
-your phone, say) is refused: Chesly can't change it on the network. So is email, which can't be
-edited or unsent. `edit` takes text messages only, not photos, videos, files, voice notes,
+`delete` works on any message you sent: from Chesly (its apps or the API, such as a `chesly send`,
+whose answer's `id` is the message ID) or from the network's own app (WhatsApp on your phone, say).
+`edit` works only on messages you sent from Chesly: one you sent in the network's own app is
+refused, as Chesly can't change its text on the network. Email can be neither edited nor unsent. `edit` takes text messages only, not photos, videos, files, voice notes,
 stickers, locations, polls or calls. Its text comes on stdin like a send's, and the network caps it
 as it caps a send: 1,000 characters on Instagram, 2,000 on Discord, 4,096 on Telegram, 10,000
 elsewhere.
@@ -223,8 +223,8 @@ network would keep showing the old message:
 | Grok Bot, Muse | not possible | not possible |
 
 A refused edit exits 1 with `message_not_editable`, and a refused delete with
-`message_not_deletable`. The error says why: not sent from Chesly, not text, deleted, email, a
-network that takes none, or past the network's time limit, which it names.
+`message_not_deletable`. The error says why: not yours, not sent from Chesly (an edit), not text,
+deleted, email, a network that takes none, or past the network's time limit, which it names.
 
 `edit` prints the edited message, with its new `text` and `edited: true`. `delete` prints
 `{"id":"msg_...","deleted":true}`, or "Deleted <id> for everyone in the chat." in a terminal. A
@@ -369,7 +369,7 @@ each key and to all your keys together. With `--json` it prints the API's `GET /
 | `chesly catchup [--chats <n>] [--per-chat <n>] [--network <name>]` | Your unread chats (not muted or archived) with their latest messages, in one call (`GET /v1/catch_up`) |
 | `chesly send <chat> [text\|-] [--reply-to <msg_id>] [--file <path>\|--media-id <id>] [--wait] [--idempotency-key <key>] [--network <name>]` | Sends a message, a reply or a file (`POST /v1/media`, `POST /v1/chats/{chat_id}/messages`) |
 | `chesly edit <message_id> <text\|->` | Changes the text of a message you sent from Chesly, for everyone in the chat (`PATCH /v1/messages/{message_id}`) |
-| `chesly delete <message_id>` | Deletes a message you sent from Chesly, for everyone in the chat (`DELETE /v1/messages/{message_id}`) |
+| `chesly delete <message_id>` | Deletes a message you sent, from Chesly or the network's own app, for everyone in the chat (`DELETE /v1/messages/{message_id}`) |
 | `chesly watch [--chat <chat>] [--account <acct_id>] [--types <a,b>] [--networks <a,b>] [--after <evt_id>]` | Prints events as they happen, one per line (`GET /v1/events/stream`) |
 | `chesly webhooks list\|create\|delete\|rotate\|test\|deliveries` | Manages webhooks (`/v1/webhooks`) |
 | `chesly keys list\|revoke <key_id>` | Lists or revokes API keys (`/v1/keys`) |
