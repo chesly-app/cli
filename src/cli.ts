@@ -50,7 +50,7 @@ Exit codes:
      running (409), or a send the network didn't confirm (check the chat
      before sending again); retry_after, when there is one, says when
   6  payment required: an API plan is needed, or this period's transcription
-     minutes are used up
+     minutes are used up (Starter has none)
 
 Examples:
   chesly catchup                       your unread chats and their latest messages
