@@ -265,6 +265,7 @@ const BILLING_URL = 'https://web.chesly.app/api/billing';
 
 /** What each plan is called. A plan this CLI doesn't know yet shows as the API names it. */
 const PLAN_NAMES: ReadonlyMap<string, string> = new Map([
+  ['starter', 'Starter'],
   ['personal', 'Personal'],
   ['pro', 'Pro'],
 ]);
@@ -359,9 +360,10 @@ function scheduledChange(change: unknown): string {
 /**
  * `59 of 60 min`: the minutes used of the period's included ones, rounded down, so the cap shows
  * only once it is reached. At or past it (one note may run past the line), when they come back:
- * `60 of 60 min, used up until Nov 28`. `2 min` when none are included.
+ * `60 of 60 min, used up until Nov 28`. `2 min` when none are included. Starter has no transcription.
  */
 function transcriptionMinutes(plan: PlanSummary): string {
+  if (plan.plan === 'starter') return 'not part of Starter';
   const usedSeconds = Number(plan.transcription_seconds_this_period) || 0;
   const used = count(Math.floor(usedSeconds / 60));
   const included = Number(plan.transcription_seconds_included);

@@ -347,8 +347,8 @@ Sends:
   telegram · 0/30 this hour · 12/150 today
 ```
 
-An API plan is a flat monthly price, Personal or Pro: calls are counted, never billed, and each plan
-has its own transcription minutes and limits (https://web.chesly.app/api/billing). Minutes used
+An API plan is a flat monthly price, Starter, Personal or Pro: calls are counted, never billed, and
+each plan has its own limits and, on Personal and Pro, transcription minutes (https://web.chesly.app/api/billing). Minutes used
 round down, and once they're used up the line says when they come back
 (`600 of 600 min, used up until Nov 28`). A downgrade waits for the end of the period, and the plan
 line says when (`Plan: Pro, active: changes to Personal on Jan 14`). The request limits apply to

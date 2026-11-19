@@ -206,6 +206,33 @@ describe('chesly usage', () => {
     ]);
   });
 
+  it('usage_shows_starter_with_no_transcription_and_its_limits', async () => {
+    serve({
+      '/v1/me': () =>
+        json(200, {
+          ...ME_WAVE_2,
+          limits: { ...ME_WAVE_2.limits, requests_per_second: 5, requests_per_minute: 300, api_keys: 100, webhooks: 5, event_streams: 2, event_retention_days: 1 },
+          plan: {
+            ...ME_WAVE_2.plan,
+            plan: 'starter',
+            status: 'active',
+            trial_ends_at: null,
+            period_end: '2026-11-28T12:00:00.000Z',
+            transcription_seconds_this_period: 0,
+            transcription_seconds_included: 0,
+          },
+        }),
+    });
+    const starter = captureIo(true);
+    expect(await run(['usage'], starter.io)).toBe(0);
+    expect(starter.stdout.split('\n').slice(0, 4)).toEqual([
+      'Plan: Starter, active: it renews Nov 28',
+      'Calls this period: 12,345 (counted, not billed)',
+      'Transcription this period: not part of Starter',
+      'Limits: 5 requests a second, 300 a minute · 100 API keys · 5 webhooks · 2 event streams · 1 day of event history',
+    ]);
+  });
+
   it('usage_notes_a_downgrade_waiting_for_the_periods_end', async () => {
     // R118, R119: a downgrade applies when the period ends; until then the plan line says so.
     const active = { status: 'active', trial_ends_at: null, period_end: '2026-11-28T12:00:00.000Z' };

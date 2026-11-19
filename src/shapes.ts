@@ -34,12 +34,12 @@ export interface Me {
 }
 
 /**
- * The API plan and this period's usage, from `GET /v1/me` (v2, R117): a flat monthly plan, Personal
- * or Pro. Calls are counted, never billed; transcription has the plan's minutes.
+ * The API plan and this period's usage, from `GET /v1/me` (v2, R117): a flat monthly plan, Starter,
+ * Personal or Pro. Calls are counted, never billed; transcription has the plan's minutes.
  */
 export interface PlanSummary {
   /** The plan bought; a comp reads 'pro'; null without one. */
-  plan: 'personal' | 'pro' | null;
+  plan: 'starter' | 'personal' | 'pro' | null;
   /** unpaid: Stripe stopped retrying the payment, and there is no access. */
   status: 'none' | 'trialing' | 'active' | 'past_due' | 'unpaid' | 'canceled' | 'comped';
   trial_ends_at: string | null;
@@ -50,10 +50,10 @@ export interface PlanSummary {
   /** Counted, never billed. */
   calls_this_period: number;
   transcription_seconds_this_period: number;
-  /** The period's minutes in seconds: 3,600 Personal, 18,000 Pro, 0 without a plan. */
+  /** The period's minutes in seconds: 0 Starter, 36,000 Personal, 180,000 Pro, 0 without a plan. */
   transcription_seconds_included: number;
   /** A downgrade waiting for the period's end (R118, R119); null without one. */
-  scheduled_change: { plan: 'personal' | 'pro'; at: string } | null;
+  scheduled_change: { plan: 'starter' | 'personal' | 'pro'; at: string } | null;
 }
 
 /** One connected account's send cap (`limits.sends` in `GET /v1/me`), over rolling windows. */
