@@ -195,12 +195,16 @@ inside double quotes the shell still expands `$` and backticks, so "It costs $5"
 "It costs ", while the quotes around `EOF` keep the text exactly as written.
 
 A file can be at most 50 MB (50,000,000 bytes); a bigger one is refused before anything is uploaded.
-`--file` works in an email thread too: the file goes as the reply's attachment, and the text as its
-body. Email providers refuse files over 25 MB (25,000,000 bytes), so a bigger one is refused there
-(400 `media_too_large`, exit 1).
 An upload must arrive whole within 60 seconds, at 50 KB/s or faster on average. A slower one is
 refused (408 `upload_timeout`), and so are the account's uploads for the next 60 seconds (429
 `rate_limited`, with the seconds left); both exit 5. On a slow connection, send a smaller file.
+
+`--file` works in an email thread too: the file goes as the reply's attachment, and the text as its
+body. Email providers refuse files over 25 MB (25,000,000 bytes), so a bigger one is refused there
+(400 `media_too_large`, exit 1).
+
+To forward a file someone sent, give its media ID from `chesly read` as `--media-id`: it goes to the
+other chat with no download or upload.
 
 `send` prints the message the API answered. Its `delivery.status` is `queued` until the network
 takes it; `--wait` checks every second (or later, when a refused check's Retry-After says so),

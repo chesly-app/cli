@@ -41,7 +41,7 @@ export function registerSend(program: Command, io: Io): void {
     .argument('[text]', 'the text to send; - reads it from stdin')
     .option('--reply-to <msg_id>', 'reply to this message: a msg_ ID from chesly read')
     .option('--file <path>', "attach this file (at most 50 MB, or 25 MB to email); the text is its caption, or the email's body")
-    .option('--media-id <id>', 'attach a file uploaded before (a media_ ID), as a retry of a file send does')
+    .option('--media-id <id>', 'attach a file by its media_ ID: one from chesly read, to forward it, or one uploaded before')
     .option('--wait', 'wait up to 30 s until the network has it: sent, delivered or failed')
     .option(
       '--idempotency-key <key>',
@@ -77,6 +77,9 @@ a new upload would make another media ID, which the same key refuses (422).
 In an email thread, --file sends the file as the reply's attachment, with
 the text as its body. Email providers refuse files over 25 MB, so a bigger
 one is refused there (media_too_large).
+
+To forward a file someone sent, give its media ID from chesly read as
+--media-id: it goes to this chat with no download or upload.
 
 Pass the text on stdin with a quoted heredoc (- <<'EOF'), not as a
 double-quoted argument: inside double quotes the shell still expands $ and
