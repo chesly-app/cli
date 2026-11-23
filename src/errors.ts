@@ -50,8 +50,11 @@ export const LOCAL_ERROR_CODES: ReadonlyArray<{ code: string; title: string }> =
   { code: 'delivery_failed', title: 'The network did not take the message.' },
   { code: 'delivery_unconfirmed', title: "The network didn't confirm the message, so it may have been delivered." },
   { code: 'expired_token', title: 'The sign-in code expired.' },
+  { code: 'file_exists', title: 'A file is already there.' },
   { code: 'file_unreadable', title: "The file can't be read." },
+  { code: 'file_unwritable', title: "The file can't be saved there." },
   { code: 'internal_error', title: 'Something went wrong on our side.' },
+  { code: 'interrupted', title: 'The command was stopped before it finished.' },
   { code: 'invalid_api_url', title: 'CHESLY_API_URL is not a usable API URL.' },
   { code: 'invalid_key_format', title: 'The API key is not well formed.' },
   { code: 'invalid_response', title: "The API's answer is not what the CLI expects." },
@@ -167,6 +170,16 @@ export class KeychainTimeoutError extends Error {
     super(`The keychain didn't answer within ${seconds} s.`);
     this.name = 'KeychainTimeoutError';
   }
+}
+
+/** A file system error for people: "no such file" or "permission denied" rather than the whole syscall line. */
+export function fileErrorReason(error: unknown): string {
+  const { code, message } = (error ?? {}) as NodeJS.ErrnoException;
+  if (code === 'ENOENT') return 'no such file';
+  if (code === 'EACCES' || code === 'EPERM') return 'permission denied';
+  if (code === 'ENOSPC') return 'no space left on the disk';
+  if (code === 'EROFS') return 'the file system is read-only';
+  return typeof message === 'string' && message !== '' ? message : 'it failed';
 }
 
 /** The problem `type` for an error code, the API's convention, which the CLI's own errors share. */

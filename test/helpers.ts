@@ -51,7 +51,8 @@ export async function openFakeKeychain(): Promise<Keychain | null> {
 
 /**
  * Captures what a run writes to stdout and stderr. `isTTY` is whether stdout is a terminal; stdin is
- * a pipe holding `stdin.text` (empty by default), or a terminal with `stdin.isTTY`.
+ * a pipe holding `stdin.text` (empty by default), or a terminal with `stdin.isTTY`. Bytes written to
+ * stdout as bytes (a download's `-o -`) are kept apart, in `stdoutBytes`.
  */
 export function captureIo(
   isTTY = false,
@@ -59,18 +60,23 @@ export function captureIo(
 ): {
   io: Io;
   readonly stdout: string;
+  readonly stdoutBytes: Buffer;
   readonly stderr: string;
   readonly stdinReads: number;
   /** Ctrl+C: what SIGINT does to a run. */
   interrupt: () => void;
 } {
   let stdout = '';
+  const stdoutChunks: Buffer[] = [];
   let stderr = '';
   let stdinReads = 0;
   const interruptHandlers = new Set<() => void>();
   const io: Io = {
     out: (text) => {
       stdout += text;
+    },
+    outBytes: async (chunk) => {
+      stdoutChunks.push(Buffer.from(chunk));
     },
     err: (text) => {
       stderr += text;
@@ -92,6 +98,9 @@ export function captureIo(
     io,
     get stdout() {
       return stdout;
+    },
+    get stdoutBytes() {
+      return Buffer.concat(stdoutChunks);
     },
     get stderr() {
       return stderr;

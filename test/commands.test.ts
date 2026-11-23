@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
 import { API_ERROR_CODES, CliError, EXIT, LOCAL_ERROR_CODES, LOCAL_WARNING_CODES, apiExitCode } from '../src/errors.js';
-import { formatWhen, reportError, terminalSafe } from '../src/output.js';
+import { formatBytes, formatWhen, reportError, terminalSafe } from '../src/output.js';
 import {
   BOOK_CLUB,
   IMESSAGE,
@@ -718,7 +718,7 @@ describe('cli errors', () => {
   it('every_command_says_what_it_prints_with_an_example', async () => {
     const commands = [
       ['login'], ['logout'], ['whoami'], ['key'], ['accounts'], ['chats'], ['read'], ['search'], ['catchup'],
-      ['send'], ['edit'], ['delete'], ['watch'], ['webhooks', 'list'], ['webhooks', 'create'], ['webhooks', 'delete'],
+      ['send'], ['edit'], ['delete'], ['download'], ['watch'], ['webhooks', 'list'], ['webhooks', 'create'], ['webhooks', 'delete'],
       ['webhooks', 'rotate'], ['webhooks', 'test'], ['webhooks', 'deliveries'], ['keys', 'list'],
       ['keys', 'revoke'], ['usage'],
     ];
@@ -763,5 +763,17 @@ describe('formatting helpers', () => {
     expect(formatWhen(at(2025, 0, 3, 7, 0), { time: true, now })).toBe('2025-01-03 07:00');
     expect(formatWhen(null, { now })).toBe('');
     expect(formatWhen('not a date', { now })).toBe('');
+  });
+
+  it('format_bytes_counts_in_the_units_of_the_apis_limits_rounding_down', () => {
+    expect(formatBytes(0)).toBe('0 bytes');
+    expect(formatBytes(1)).toBe('1 byte');
+    expect(formatBytes(999)).toBe('999 bytes');
+    expect(formatBytes(1_000)).toBe('1 KB');
+    expect(formatBytes(4_199)).toBe('4.1 KB');
+    expect(formatBytes(120_400)).toBe('120 KB');
+    expect(formatBytes(999_999)).toBe('999 KB');
+    expect(formatBytes(1_500_000)).toBe('1.5 MB');
+    expect(formatBytes(50_000_000)).toBe('50 MB');
   });
 });

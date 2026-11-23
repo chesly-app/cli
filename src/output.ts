@@ -5,6 +5,8 @@ import { AnnotatedError, CliError, EXIT, RETRY_LATER_STATUSES, apiExitCode, erro
 /** Where a run writes, and the input it may read. `isTTY` says whether stdout is a terminal. */
 export interface Io {
   out: (text: string) => void;
+  /** Bytes to stdout, as they are (a download's `-o -`). Resolves once they are written, so a slow reader slows the writer. */
+  outBytes: (chunk: Uint8Array) => Promise<void>;
   err: (text: string) => void;
   isTTY: boolean;
   /** Read only when a command is told to (`-`): reading a terminal would be a prompt. */
@@ -16,6 +18,10 @@ export interface Io {
 export function processIo(): Io {
   return {
     out: (text) => void process.stdout.write(text),
+    outBytes: (chunk) =>
+      new Promise((resolve, reject) => {
+        process.stdout.write(chunk, (error) => (error ? reject(error) : resolve()));
+      }),
     err: (text) => void process.stderr.write(text),
     isTTY: process.stdout.isTTY === true,
     stdin: {
@@ -178,6 +184,17 @@ function twoDigits(value: number): string {
 }
 
 /**
+ * A size for people, in the units the API's limits use (1 MB is 1,000,000 bytes): `512 bytes`,
+ * `4.1 KB`, `120 KB`, `12 MB`.
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1000) return `${bytes} ${bytes === 1 ? 'byte' : 'bytes'}`;
+  const [value, unit] = bytes < 1e6 ? [bytes / 1e3, 'KB'] : bytes < 1e9 ? [bytes / 1e6, 'MB'] : [bytes / 1e9, 'GB'];
+  const shown = value < 10 ? (Math.floor(value * 10) / 10).toFixed(1).replace(/\.0$/, '') : String(Math.floor(value));
+  return `${shown} ${unit}`;
+}
+
+/**
  * Prints `error` on stderr and returns the exit code to leave with. JSON mode prints one line of
  * problem details: an API error's exactly as the API sent them (`type`, `title`, `status`, `detail`,
  * `code`, `request_id`), and the CLI's own errors as `{ "type", "title", "code" }` plus their extras
@@ -243,6 +260,7 @@ const CLI_WORDING: Readonly<Record<string, { message?: string; hint: string }>> 
       'On a slow connection, send a smaller file.',
   },
   key_not_found: { hint: 'chesly keys list lists your API keys.' },
+  media_not_found: { hint: 'chesly read <chat> shows the media ID of each file in a chat.' },
 };
 
 function describeFailure(error: unknown): Failure {

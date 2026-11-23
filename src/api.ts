@@ -108,14 +108,20 @@ export class CheslyApiError extends Error {
   }
 }
 
-/** The request got no HTTP answer: DNS, a refused connection, a dropped connection or a timeout. */
+/**
+ * The request got no HTTP answer (DNS, a refused connection, a dropped connection or a timeout), or
+ * an answer that broke off partway (`midAnswer`: a download's body).
+ */
 export class CheslyNetworkError extends Error {
-  /** No answer came within the request's time limit. */
+  /** No answer came within the request's time limit, or, partway, no byte within the idle limit. */
   readonly timedOut: boolean;
 
-  constructor(url: string, cause: unknown, timeoutMs = TIMEOUT_MS) {
+  /** `cause` is the error fetch or the body threw, or why in words. */
+  constructor(url: string, cause: unknown, timeoutMs = TIMEOUT_MS, midAnswer = false) {
     // No `cause` attached: fetch's own errors can quote header values, the key among them.
-    super(`Couldn't reach ${new URL(url).origin}: ${networkReason(cause, timeoutMs)}`);
+    const origin = new URL(url).origin;
+    const reason = typeof cause === 'string' ? cause : networkReason(cause, timeoutMs, midAnswer);
+    super(midAnswer ? `The answer from ${origin} broke off: ${reason}` : `Couldn't reach ${origin}: ${reason}`);
     this.name = 'CheslyNetworkError';
     this.timedOut = isTimeout(rootCause(cause));
   }
@@ -229,6 +235,17 @@ export async function idempotentPost<T>(
   }
 }
 
+/**
+ * The retry rule of idempotentPost, for a request that is as safe to repeat (a download): after a
+ * network error, a 502, 503 or 504, or a 429 that lifts within 10 s, ask again, twice at most. The
+ * wait before asking again after `retried` retries, or undefined when the error isn't one to retry
+ * or the retries are used up.
+ */
+export function retryDelayMs(error: unknown, retried: number): number | undefined {
+  if (retried >= RETRY_DELAYS_MS.length || (!isShortLimit(error) && !isTransient(error))) return undefined;
+  return retryWaitMs(error, retried);
+}
+
 /** The wait before asking again: the answer's Retry-After, at most 10 s, when it has one; else 1 s, then 2 s. */
 function retryWaitMs(error: unknown, retried: number): number {
   const retryAfter = error instanceof CheslyApiError ? error.retryAfter : undefined;
@@ -318,6 +335,46 @@ export async function openEventStream(
   } catch (error) {
     init.signal.removeEventListener('abort', close);
     throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Opens `GET <path>` for its bytes (a file): the answer once its headers are in, for the caller to
+ * read the body of, with the URL it came from. The bytes come as stored (`Accept-Encoding:
+ * identity`), so Content-Length is the file's size. A refusal throws CheslyApiError (its problem
+ * details read first), and no answer within 30 s CheslyNetworkError. Aborting `signal` ends the
+ * request, the body included; the body itself has no time limit here.
+ */
+export async function openDownload(
+  path: string,
+  init: { key: string; signal: AbortSignal },
+): Promise<{ response: Response; url: string }> {
+  const headers = requestHeaders(init.key, '*/*', { 'accept-encoding': 'identity' });
+  const url = `${apiBaseUrl()}${path}`;
+  const connection = new AbortController();
+  const close = () => connection.abort(init.signal.reason);
+  init.signal.addEventListener('abort', close, { once: true });
+  if (init.signal.aborted) close();
+  const timer = setTimeout(
+    () => connection.abort(new DOMException('No answer in time.', 'TimeoutError')),
+    TIMEOUT_MS,
+  );
+  try {
+    let response: Response;
+    try {
+      response = await fetch(url, { headers, signal: connection.signal });
+    } catch (cause) {
+      if (init.signal.aborted) throw cause; // The caller stopped it: not a network failure.
+      throw new CheslyNetworkError(url, cause);
+    }
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw errorFromResponse(response, parseJson(text));
+    }
+    // From here on only `signal` ends it: the connection follows it while the body is read.
+    return { response, url };
   } finally {
     clearTimeout(timer);
   }
@@ -427,16 +484,16 @@ function nonEmpty(value: unknown): string | undefined {
  * ENOTFOUND, UND_ERR_CONNECT_TIMEOUT, CERT_HAS_EXPIRED…) are quoted: their messages name the host and
  * the system call. Anything else, such as fetch's TypeError about a header, is never repeated.
  */
-function networkReason(error: unknown, timeoutMs: number): string {
+function networkReason(error: unknown, timeoutMs: number, midAnswer: boolean): string {
   const current = rootCause(error);
-  if (isTimeout(current)) return `no answer within ${timeoutMs / 1000} s`;
+  if (isTimeout(current)) return midAnswer ? `nothing arrived for ${timeoutMs / 1000} s` : `no answer within ${timeoutMs / 1000} s`;
   // Each address tried (localhost is ::1 and 127.0.0.1), when the error naming them all says nothing.
   if (current instanceof AggregateError) {
     const tried = current.errors.filter(isSystemError).map((attempt) => attempt.message);
     if (tried.length > 0) return tried.join('; ');
   }
   if (isSystemError(current)) return current.message;
-  return 'the request failed before it reached the API';
+  return midAnswer ? 'the connection failed' : 'the request failed before it reached the API';
 }
 
 /** The error at the end of `error`'s cause chain (fetch wraps the real one as its cause). */

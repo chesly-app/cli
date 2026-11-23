@@ -4,6 +4,7 @@ import { registerAccounts } from './commands/accounts.js';
 import { registerCatchup } from './commands/catchup.js';
 import { registerChats } from './commands/chats.js';
 import { registerDelete } from './commands/delete.js';
+import { registerDownload } from './commands/download.js';
 import { registerEdit } from './commands/edit.js';
 import { registerKey } from './commands/key.js';
 import { registerKeys } from './commands/keys.js';
@@ -57,6 +58,7 @@ Examples:
   chesly send "Mom" - --wait <<'EOF'   the text on stdin, exactly as written
   On my way
   EOF
+  chesly download media_…              a file from a message, by its media ID
   chesly watch --json                  live events, one JSON object a line
   chesly chats --network email         your email threads
 
@@ -99,6 +101,7 @@ function buildProgram(io: Io, json: boolean): Command {
   registerSend(program, io);
   registerEdit(program, io);
   registerDelete(program, io);
+  registerDownload(program, io);
   registerWatch(program, io);
   registerWebhooks(program, io);
   registerKeys(program, io);

@@ -37,6 +37,16 @@ export function parseMessageId(value: string): string {
   return id;
 }
 
+/**
+ * A `<media_id>` argument: `media_` and base64url, as the API makes every media ID, checked before
+ * any request (a msg_ ID, or anything a URL would read as a path, never reaches the API).
+ */
+export function parseMediaId(value: string): string {
+  const id = value.trim();
+  if (!/^media_[A-Za-z0-9_-]+$/.test(id)) throw new InvalidArgumentError("Give a file's media ID (media_…), as chesly read shows it.");
+  return id;
+}
+
 /** A comma-separated list such as `--types a,b`: trimmed, without empty or repeated items. */
 export function parseList(value: string): string[] {
   const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];

@@ -1,60 +1,13 @@
 import { openAsBlob } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
+import { basename } from 'node:path';
 import { apiRequest } from './api.js';
-import { CliError, EXIT } from './errors.js';
+import { CliError, EXIT, fileErrorReason } from './errors.js';
+import { mimeTypeOf } from './mime.js';
 import { isMediaUpload, type MediaUpload } from './shapes.js';
 
 /** The most one attachment can weigh: 50 MB (50,000,000 bytes), the homeserver's own cap, as the API's (R97). */
 const MAX_UPLOAD_BYTES = 50_000_000;
-
-/**
- * The type the API files an attachment by: `image/*` is sent as a photo, `video/*` as a video,
- * `audio/*` as audio, anything else as a document. Unknown extensions go as plain bytes.
- */
-const MIME_TYPES: Readonly<Record<string, string>> = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  heic: 'image/heic',
-  heif: 'image/heif',
-  avif: 'image/avif',
-  bmp: 'image/bmp',
-  tif: 'image/tiff',
-  tiff: 'image/tiff',
-  svg: 'image/svg+xml',
-  mp4: 'video/mp4',
-  m4v: 'video/x-m4v',
-  mov: 'video/quicktime',
-  webm: 'video/webm',
-  mkv: 'video/x-matroska',
-  '3gp': 'video/3gpp',
-  mp3: 'audio/mpeg',
-  m4a: 'audio/mp4',
-  aac: 'audio/aac',
-  wav: 'audio/wav',
-  flac: 'audio/flac',
-  ogg: 'audio/ogg',
-  oga: 'audio/ogg',
-  opus: 'audio/ogg',
-  amr: 'audio/amr',
-  pdf: 'application/pdf',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  csv: 'text/csv',
-  json: 'application/json',
-  vcf: 'text/vcard',
-  ics: 'text/calendar',
-  zip: 'application/zip',
-  doc: 'application/msword',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ppt: 'application/vnd.ms-powerpoint',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-};
 
 /** At least this many bytes a second, so a large file isn't cut off by the 30 s a request gets. */
 const SLOWEST_UPLOAD_BYTES_PER_SECOND = 131_072;
@@ -80,7 +33,7 @@ export async function readUpload(path: string): Promise<FileToUpload> {
     return { blob: await openAsBlob(path, { type: mimeTypeOf(path) }), name: basename(path), size: info.size };
   } catch (error) {
     if (error instanceof CliError) throw error;
-    throw new CliError('file_unreadable', `Can't read ${path}: ${reasonOf(error)}`, EXIT.USAGE);
+    throw new CliError('file_unreadable', `Can't read ${path}: ${fileErrorReason(error)}`, EXIT.USAGE);
   }
 }
 
@@ -99,16 +52,4 @@ export async function uploadFile(file: FileToUpload, key: string): Promise<Media
   });
   if (!isMediaUpload(upload)) throw new CliError('invalid_response', 'The API sent no media ID for the upload.');
   return upload;
-}
-
-function mimeTypeOf(path: string): string {
-  return MIME_TYPES[extname(path).slice(1).toLowerCase()] ?? 'application/octet-stream';
-}
-
-/** A file system error for people: "no such file or directory" rather than the whole syscall line. */
-function reasonOf(error: unknown): string {
-  const { code, message } = (error ?? {}) as NodeJS.ErrnoException;
-  if (code === 'ENOENT') return 'no such file';
-  if (code === 'EACCES' || code === 'EPERM') return 'permission denied';
-  return typeof message === 'string' && message !== '' ? message : 'it failed';
 }
