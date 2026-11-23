@@ -1,6 +1,6 @@
 {
   "name": "chesly",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Chesly CLI: your chats from the terminal and your agents",
   "license": "MIT",
   "type": "module",
