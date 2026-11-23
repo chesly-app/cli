@@ -747,6 +747,9 @@ describe('cli errors', () => {
       account_reconnect_required: [409, 1],
       api_paused: [503, 5],
       payload_too_large: [413, 1],
+      file_url_invalid: [400, 1],
+      file_fetch_failed: [422, 1],
+      link_not_found: [404, 4],
     };
 
     expect(API_ERROR_CODES.map((entry) => entry.code).sort()).toEqual(Object.keys(expected).sort());

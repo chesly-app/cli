@@ -125,6 +125,9 @@ export const API_ERROR_CODES: ReadonlyArray<{ code: string; status: number; titl
   { code: 'account_reconnect_required', status: 409, title: 'This account needs to be reconnected.' },
   { code: 'api_paused', status: 503, title: 'The Chesly API is paused.' },
   { code: 'payload_too_large', status: 413, title: 'The request body is too large.' },
+  { code: 'file_url_invalid', status: 400, title: "This file URL can't be used." },
+  { code: 'file_fetch_failed', status: 422, title: "The file couldn't be fetched." },
+  { code: 'link_not_found', status: 404, title: 'Link not found.' },
 ];
 
 /**
