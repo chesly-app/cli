@@ -20,10 +20,12 @@ export function registerDownload(program: Command, io: Io): void {
     .addHelpText(
       'after',
       `
-chesly read shows the media ID of each file in a chat, under the message
-that carries it: a photo, a video, a voice note, a document, or each of an
-email's attachments. In JSON it is a message's media.id, or the id of each
-of its email.attachments.
+chesly read shows each file in a chat on a line of its own, under the
+message that carries it, with the media ID this command takes:
+  [image] beach.jpg · media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv
+A file is a photo, a video, a voice note or a document, or each of an
+email's attachments. In JSON its media ID is a message's media.id, or the
+id of each of the message's email.attachments.
 
 The file is saved under its own name in this directory, or where -o says:
 a file name, or a directory to save it in under its own name. Its own name
@@ -49,7 +51,7 @@ asked for again once the first bytes went out.
 
 Examples:
   chesly read "Mom"
-  chesly download media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv -o beach.jpg
+  chesly download media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv -o photo.jpg
   chesly download media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv -o ~/Downloads
   chesly download media_Y2hlc2x5LmFwcC9JbnZvaWNlUGRm -o - | pdftotext - -`,
     )

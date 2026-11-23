@@ -40,7 +40,7 @@ export function registerSend(program: Command, io: Io): void {
     .argument('<chat>', 'a chat ID (chat_…) or a chat name')
     .argument('[text]', 'the text to send; - reads it from stdin')
     .option('--reply-to <msg_id>', 'reply to this message: a msg_ ID from chesly read')
-    .option('--file <path>', 'attach this file (at most 50 MB); the text becomes its caption')
+    .option('--file <path>', "attach this file (at most 50 MB, or 25 MB to email); the text is its caption, or the email's body")
     .option('--media-id <id>', 'attach a file uploaded before (a media_ ID), as a retry of a file send does')
     .option('--wait', 'wait up to 30 s until the network has it: sent, delivered or failed')
     .option(
@@ -74,6 +74,10 @@ sending twice, pass the same --idempotency-key again. A file send that gives
 up also names its upload: retry it with --media-id <id> instead of --file, as
 a new upload would make another media ID, which the same key refuses (422).
 
+In an email thread, --file sends the file as the reply's attachment, with
+the text as its body. Email providers refuse files over 25 MB, so a bigger
+one is refused there (media_too_large).
+
 Pass the text on stdin with a quoted heredoc (- <<'EOF'), not as a
 double-quoted argument: inside double quotes the shell still expands $ and
 backticks, while the quoted EOF keeps the text exactly as written.
@@ -87,6 +91,9 @@ Examples:
   EOF
   chesly send chat_7Hq2mR9xLp4vT1sK8nWz - --file report.pdf <<'EOF'
   The report is attached.
+  EOF
+  chesly send "Invoice 42" - --network email --file receipt.pdf <<'EOF'
+  Paid, the receipt is attached.
   EOF`,
     )
     .action(async (chat: string, text: string | undefined, options: SendOptions, command: Command) => {

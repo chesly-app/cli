@@ -4,9 +4,9 @@ Your chats from the terminal, for you and your agents. `chesly` is the command-l
 [Chesly](https://chesly.app) API. It is built for agents (Claude Code, Codex, OpenClaw) as much as
 for people: JSON when piped, stable exit codes, and it never prompts.
 
-Read your chats, send messages, edit or delete the ones you sent, follow events as they happen,
-and manage webhooks, on WhatsApp, Telegram, Signal, iMessage, Instagram, Messenger, X, LinkedIn,
-Discord, Slack, Reddit, Google Messages, Google Chat and email.
+Read your chats, download the files in them, send messages and files, edit or delete the ones you
+sent, follow events as they happen, and manage webhooks, on WhatsApp, Telegram, Signal, iMessage,
+Instagram, Messenger, X, LinkedIn, Discord, Slack, Reddit, Google Messages, Google Chat and email.
 
 ## Install
 
@@ -120,7 +120,55 @@ chesly search "boarding pass" --network whatsapp  # one network only
 chesly send "Invoice 42" - --network email <<'EOF'  # a reply to that thread
 Paid, thank you.
 EOF
+chesly send "Invoice 42" - --network email --file receipt.pdf <<'EOF'  # a reply with a file
+Paid, the receipt is attached.
+EOF
 ```
+
+An email thread's messages list their attachments, each with a media ID that `chesly download`
+takes, and a reply can carry a file of its own, as its attachment (see below).
+
+## Download files
+
+Each file in a message (a photo, a video, a voice note, a document) and each of an email's
+attachments has a media ID (`media_…`). `chesly read` shows it under the message that carries it:
+
+```
+Oct 27 09:00  Mom  Look at this
+                   [image] beach.jpg · media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv
+Oct 27 09:03  Ana  Here is the invoice.
+                   [file] invoice.pdf · 120 KB · media_ZW1haWw6M2YyYzlhMWUtNWI3ZC00YzhlLTlmMGEtMWIyYzNkNGU1ZjYw
+```
+
+```sh
+chesly download media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv                 # saved here, as beach.jpg
+chesly download media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv -o photo.jpg    # under another name
+chesly download media_Y2hlc2x5LmFwcC9CZWFjaFBob3Rv -o ~/Downloads  # into a directory, under its own name
+chesly download media_ZW1haWw6M2YyYzlhMWUtNWI3ZC00YzhlLTlmMGEtMWIyYzNkNGU1ZjYw -o - | pdftotext - -
+```
+
+In JSON, a file's media ID is a message's `media.id`, or the `id` of each of an email's
+`email.attachments` (`{"id","file_name","mime_type","size"}`; an email's `media` is `null`).
+
+`download` saves the file under its own name, made safe to save: never a path, a hidden file or a
+name that starts with `-`, and without characters a terminal or Windows would act on. A file without
+a name is saved as its media ID with its type's extension. It never replaces a file without
+`--force`: it exits 2 with `file_exists` (and the file's `path`) and saves nothing. The file is
+written under a temporary name in the same directory and takes its name once whole, so a download
+that fails or is stopped (Ctrl+C) leaves nothing behind.
+
+It prints `{"path":"/home/me/beach.jpg","size":48213,"mime_type":"image/jpeg"}` (the whole path,
+and the size in bytes), or `Saved beach.jpg · 48 KB · image/jpeg` in a terminal. The API sends a
+file a browser could open as a page (a PDF, HTML, an SVG) as `application/octet-stream`;
+`mime_type` then goes by the extension of the file's name. With `-o -` the file's bytes go to stdout
+and nothing else does, so stdout must be a pipe or a file, never a terminal.
+
+A file is at most 50 MB. An unknown media ID exits 4 (`media_not_found`), and a file no longer kept
+exits 1 (`media_expired`). A file briefly unavailable (`media_unavailable`), a 502, 503, 504 or 429,
+or a dropped connection is asked for again as a send is (after the answer's `Retry-After`, at most
+10 seconds, or 1 and then 2 seconds; twice at most), then exits 5, or 1 for a connection. A download
+that sends nothing for 30 seconds has dropped. With `-o -`, nothing is asked for again once the first
+bytes went out.
 
 ## Send messages
 
@@ -147,6 +195,9 @@ inside double quotes the shell still expands `$` and backticks, so "It costs $5"
 "It costs ", while the quotes around `EOF` keep the text exactly as written.
 
 A file can be at most 50 MB (50,000,000 bytes); a bigger one is refused before anything is uploaded.
+`--file` works in an email thread too: the file goes as the reply's attachment, and the text as its
+body. Email providers refuse files over 25 MB (25,000,000 bytes), so a bigger one is refused there
+(400 `media_too_large`, exit 1).
 An upload must arrive whole within 60 seconds, at 50 KB/s or faster on average. A slower one is
 refused (408 `upload_timeout`), and so are the account's uploads for the next 60 seconds (429
 `rate_limited`, with the seconds left); both exit 5. On a slow connection, send a smaller file.
@@ -370,6 +421,7 @@ each key and to all your keys together. With `--json` it prints the API's `GET /
 | `chesly send <chat> [text\|-] [--reply-to <msg_id>] [--file <path>\|--media-id <id>] [--wait] [--idempotency-key <key>] [--network <name>]` | Sends a message, a reply or a file (`POST /v1/media`, `POST /v1/chats/{chat_id}/messages`) |
 | `chesly edit <message_id> <text\|->` | Changes the text of a message you sent from Chesly, for everyone in the chat (`PATCH /v1/messages/{message_id}`) |
 | `chesly delete <message_id>` | Deletes a message you sent, from Chesly or the network's own app, for everyone in the chat (`DELETE /v1/messages/{message_id}`) |
+| `chesly download <media_id> [-o <path>\|-] [--force]` | Saves a file from a message, or an email's attachment, under its own name or `-o`'s, or writes it to stdout (`GET /v1/media/{media_id}`) |
 | `chesly watch [--chat <chat>] [--account <acct_id>] [--types <a,b>] [--networks <a,b>] [--after <evt_id>]` | Prints events as they happen, one per line (`GET /v1/events/stream`) |
 | `chesly webhooks list\|create\|delete\|rotate\|test\|deliveries` | Manages webhooks (`/v1/webhooks`) |
 | `chesly keys list\|revoke <key_id>` | Lists or revokes API keys (`/v1/keys`) |
@@ -400,7 +452,8 @@ included, on every network but email (add `--network email` for email threads):
 ## For agents and scripts
 
 - **Output:** tables in a terminal. When stdout is piped, or with `--json`, it prints the API's JSON
-  as is; `watch` prints one JSON object a line.
+  as is; `watch` prints one JSON object a line, and `download` where it saved the file
+  (`{"path","size","mime_type"}`), or with `-o -` the file itself.
 - **Errors** go to stderr. In JSON mode each one is a single line of problem details. Problem
   details from the API print exactly as the API sent them (`type`, `title`, `status`, `detail`,
   `code`, `request_id`, and `retry_after` when it says when to retry). In a terminal, an error that
@@ -429,9 +482,9 @@ included, on every network but email (add `--network email` for email threads):
   |---|---|
   | 0 | ok |
   | 1 | error |
-  | 2 | usage |
+  | 2 | usage: a wrong argument, or a file `download` would replace (`file_exists`) |
   | 3 | not signed in (no key, a malformed one, or the key was rejected) |
-  | 4 | not found (an unknown chat, message, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
+  | 4 | not found (an unknown chat, message, file, webhook or key, or a name that matches no chat), or ambiguous (a name that matches several) |
   | 5 | not final, come back to it: rate limited (a 429: too many requests, a send cap, uploads held after a slow one, or too many open event streams), a request that took too long to arrive (a 408, such as an upload's `upload_timeout`), briefly unavailable (a 502, 503 or 504, from the API or a gateway), a first attempt still running (a 409 `idempotency_in_progress`), or a send the network didn't confirm (`delivery_unconfirmed`: check the chat before you send it again). `retry_after` says when, if the answer has it |
   | 6 | payment required: the account needs an API plan, or this period's transcription minutes are used up (Starter has none) |
 
