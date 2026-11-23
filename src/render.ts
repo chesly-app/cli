@@ -2,9 +2,10 @@
  * The API's answers for people in a terminal: tables and transcripts. Other people's text (names,
  * messages) goes through `oneLine` or `terminalSafe` before it is shown. JSON mode never comes here.
  */
-import { formatTable, formatWhen, oneLine, terminalSafe } from './output.js';
+import { formatBytes, formatTable, formatWhen, oneLine, terminalSafe } from './output.js';
 import {
   deliveryState,
+  isEmailAttachment,
   isMessage,
   isRecord,
   isSendLimit,
@@ -80,20 +81,20 @@ export function searchTable(hits: readonly SearchHit[]): string {
       formatWhen(hit.sent_at, { time: true }),
       oneLine(hit.chat_name ?? '', 30) || hit.chat_id,
       senderLabel(hit),
-      oneLine(messageText(hit), 100),
+      messageLine(hit, 100),
     ]),
   ]);
 }
 
 /**
- * Messages for people, oldest first, one per row: time, sender, text. A message's further lines line
- * up under its first.
+ * Messages for people, oldest first, one per row: time, sender, text, then the files it carries
+ * (`messageLines`). A message's further lines line up under its first.
  */
 export function transcript(messages: readonly Message[]): string {
   const rows = chronological(messages).map((message) => ({
     when: formatWhen(message.sent_at, { time: true }),
     who: senderLabel(message),
-    lines: messageText(message).split('\n'),
+    lines: messageLines(message),
   }));
   const whenWidth = Math.max(0, ...rows.map((row) => row.when.length));
   const whoWidth = Math.max(0, ...rows.map((row) => row.who.length));
@@ -127,6 +128,70 @@ export function messageText(message: Message): string {
 }
 
 /**
+ * A message in a transcript: its text, then each file it carries on a line of its own, with the
+ * media ID chesly download takes (`[image] beach.jpg · media_…`). A file without a caption is the
+ * whole message.
+ */
+function messageLines(message: Message): string[] {
+  const files = filesOf(message).map(fileLine);
+  if (files.length === 0) return messageText(message).split('\n');
+  const text = terminalSafe(message.text ?? '').trim();
+  const marks = `${message.truncated ? ' …' : ''}${message.edited ? ' (edited)' : ''}`;
+  if (text === '') return [`${files[0]}${marks}`, ...files.slice(1)];
+  return [...`${text}${marks}`.split('\n'), ...files];
+}
+
+/** `messageText` on one line, cut to `max` characters, then the media ID of each file it carries, never cut. */
+function messageLine(message: Message, max: number): string {
+  const ids = filesOf(message).map((file) => oneLine(file.id));
+  return [oneLine(messageText(message), max), ...ids].filter(Boolean).join(' · ');
+}
+
+/** A file a message carries: its kind, name and size when known, and the media ID it downloads by. */
+interface FileRef {
+  kind: string;
+  name: string;
+  size: number | undefined;
+  id: string;
+}
+
+/**
+ * The files a message carries: its own (`media`), or an email's attachments. None for a deleted
+ * message, or for an email from an API that doesn't list attachments.
+ */
+function filesOf(message: Message): FileRef[] {
+  if (message.deleted) return [];
+  const files: FileRef[] = [];
+  const { media, email } = message;
+  if (isRecord(media) && typeof media.id === 'string' && media.id !== '') {
+    files.push({ kind: textOf(message.type), name: textOf(media.file_name), size: undefined, id: media.id });
+  }
+  const attachments = isRecord(email) && Array.isArray(email.attachments) ? email.attachments.filter(isEmailAttachment) : [];
+  for (const attachment of attachments) {
+    const size = attachment.size;
+    files.push({
+      kind: kindOf(textOf(attachment.mime_type)),
+      name: textOf(attachment.file_name),
+      size: typeof size === 'number' && Number.isSafeInteger(size) && size >= 0 ? size : undefined,
+      id: attachment.id,
+    });
+  }
+  return files;
+}
+
+/** An attachment's kind by its type, as a message's own file is typed: image, video, audio, else file. */
+function kindOf(mimeType: string): string {
+  const kind = mimeType.split('/')[0]?.trim().toLowerCase();
+  return kind === 'image' || kind === 'video' || kind === 'audio' ? kind : 'file';
+}
+
+/** `[image] beach.jpg · media_…`, `[file] invoice.pdf · 120 KB · media_…`: one file on one line, its ID whole. */
+function fileLine(file: FileRef): string {
+  const about = [oneLine(file.name, 80), file.size === undefined ? '' : formatBytes(file.size)].filter(Boolean);
+  return `[${oneLine(file.kind, 20) || 'file'}] ${[...about, oneLine(file.id)].join(' · ')}`;
+}
+
+/**
  * `Sent to Mom · queued`: where a message went (its chat's name, else its ID) and how far it got. A
  * failure the network didn't confirm reads `unconfirmed`, never `failed` (R96).
  */
@@ -149,7 +214,7 @@ export function eventLine(event: ApiEvent): string {
     const { message } = data;
     const network = oneLine(textOf(chat.network), 20);
     const name = oneLine(textOf(chat.name), 40) || message.chat_id;
-    return `${when} [${network}] ${name} — ${senderLabel(message)}: ${oneLine(messageText(message), 200)}`;
+    return `${when} [${network}] ${name} — ${senderLabel(message)}: ${messageLine(message, 200)}`;
   }
   return [when, oneLine(event.type, 40), subjectOf(data, chat)].filter(Boolean).join(' ');
 }

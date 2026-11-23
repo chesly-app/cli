@@ -10,6 +10,7 @@ import { CheslyApiError, apiRequest } from '../src/api.js';
 import { run } from '../src/cli.js';
 import { API_ERROR_CODES, CliError, EXIT, LOCAL_ERROR_CODES, LOCAL_WARNING_CODES, apiExitCode } from '../src/errors.js';
 import { formatBytes, formatWhen, reportError, terminalSafe } from '../src/output.js';
+import { eventLine } from '../src/render.js';
 import {
   BOOK_CLUB,
   IMESSAGE,
@@ -543,6 +544,118 @@ describe('in a terminal', () => {
     expect(await run(['read', 'Mom'], jsonError.io)).toBe(4);
     expect(jsonError.stderr).not.toMatch(controls);
     expect(JSON.parse(jsonError.stderr).candidates).toEqual(lookalikes);
+  });
+});
+
+describe('files in messages', () => {
+  const PHOTO_ID = 'media_Y2hlc2x5LmFwcC9QaG90b09mVGhlQmVhY2gwMQ';
+  const PLAN_ID = 'media_Y2hlc2x5LmFwcC9QbGFuRG9jdW1lbnQwMDAx';
+  const VOICE_ID = 'media_Y2hlc2x5LmFwcC9Wb2ljZU5vdGUwMDAwMDAx';
+  const INVOICE_ID = 'media_ZW1haWw6M2YyYzlhMWUtNWI3ZC00YzhlLTlmMGEtMWIyYzNkNGU1ZjYw';
+  const LOGO_ID = 'media_ZW1haWw6OGE3YjZjNWQtNGUzZi00YTFiLThjOWQtMGUxZjJhM2I0YzVk';
+
+  const captioned = message('msg_1', 'Look at this', '2026-10-27T09:00:00.000Z', undefined, {
+    type: 'image',
+    media: { id: PHOTO_ID, mime_type: 'image/jpeg', file_name: 'beach.jpg' },
+  });
+  const voice = message('msg_2', '', '2026-10-27T09:01:00.000Z', undefined, {
+    type: 'audio',
+    text: null,
+    media: { id: VOICE_ID, mime_type: 'audio/ogg' },
+  });
+  const plan = message('msg_3', '', '2026-10-27T09:02:00.000Z', { name: 'Nino', is_me: true }, {
+    type: 'file',
+    text: null,
+    media: { id: PLAN_ID, mime_type: 'application/pdf', file_name: 'plan.pdf' },
+  });
+  const email = (attachments: unknown) =>
+    message('msg_4', 'Here is the invoice.\nThanks!', '2026-10-27T09:03:00.000Z', { name: 'Ana', is_me: false }, {
+      email: {
+        subject: 'Invoice 42',
+        from: { name: 'Ana', address: 'ana@example.com' },
+        to: [{ name: null, address: 'nino@example.com' }],
+        cc: [],
+        ...(attachments === undefined ? {} : { attachments }),
+      },
+    });
+  const ATTACHMENTS = [
+    { id: INVOICE_ID, file_name: 'invoice.pdf', mime_type: 'application/pdf', size: 120_400 },
+    { id: LOGO_ID, file_name: 'logo.png', mime_type: 'image/png', size: 4_100 },
+  ];
+
+  /** `chesly read` in a terminal, of these messages (given oldest first): its lines, without the time. */
+  async function readLines(...messages: unknown[]): Promise<string[]> {
+    serve({ [`/v1/chats/${MOM.id}/messages`]: () => json(200, { messages: messages.toReversed(), next_cursor: null }) });
+    const cap = captureIo(true);
+    expect(await run(['read', MOM.id], cap.io)).toBe(0);
+    return cap.stdout.trimEnd().split('\n');
+  }
+
+  it('read_shows_each_files_media_id_to_download_it_by', async () => {
+    const lines = await readLines(captioned, voice, plan);
+
+    expect(lines).toHaveLength(4);
+    // The caption, then the file under it: its kind, name and media ID.
+    expect(lines[0]).toMatch(/\bMom {2}Look at this$/);
+    expect(lines[1]?.trim()).toBe(`[image] beach.jpg · ${PHOTO_ID}`);
+    expect(lines[1]?.indexOf('[image]')).toBe(lines[0]?.indexOf('Look at this'));
+    // Without a caption, the file is the message.
+    expect(lines[2]).toMatch(new RegExp(`\\bMom {2}\\[audio\\] ${VOICE_ID}$`));
+    expect(lines[3]).toMatch(new RegExp(`\\bYou {2}\\[file\\] plan\\.pdf · ${PLAN_ID}$`));
+  });
+
+  it('an_email_lists_its_attachments_and_one_from_an_older_api_reads_as_before', async () => {
+    const lines = await readLines(email(ATTACHMENTS));
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toMatch(/\bAna {2}Here is the invoice\.$/);
+    expect(lines.slice(1).map((line) => line.trim())).toEqual([
+      'Thanks!',
+      `[file] invoice.pdf · 120 KB · ${INVOICE_ID}`,
+      `[image] logo.png · 4.1 KB · ${LOGO_ID}`,
+    ]);
+    for (const line of lines.slice(1)) expect(line.indexOf(line.trim())).toBe(lines[0]?.indexOf('Here is'));
+
+    // No attachments (an API from before them), none, or ones the CLI can't read: the text alone.
+    for (const attachments of [undefined, [], 'none', [{ file_name: 'no-id.pdf' }], [null]]) {
+      expect(await readLines(email(attachments)), JSON.stringify(attachments)).toHaveLength(2);
+    }
+    // One whose name or size is missing still shows its ID.
+    const bare = await readLines(email([{ id: INVOICE_ID }]));
+    expect(bare[2]?.trim()).toBe(`[file] ${INVOICE_ID}`);
+  });
+
+  it('a_deleted_message_shows_no_file_and_names_are_cleaned', async () => {
+    const deleted = { ...captioned, deleted: true };
+    const hostile = message('msg_5', '', '2026-10-27T09:04:00.000Z', undefined, {
+      type: 'file',
+      text: null,
+      media: { id: PLAN_ID, file_name: 'evil\u001b]0;owned\u0007\u202e.pdf' },
+    });
+    const lines = await readLines(deleted, hostile);
+    expect(lines[0]).toMatch(/\bMom {2}\[deleted\]$/);
+    expect(lines[1]).toMatch(new RegExp(`\\[file\\] evil\\]0;owned\\.pdf · ${PLAN_ID}$`));
+    expect(lines.join('\n')).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/);
+  });
+
+  it('search_and_watch_lines_end_with_the_media_ids', async () => {
+    const hit = { ...captioned, chat_name: 'Mom', network: 'whatsapp' };
+    const mail = { ...email(ATTACHMENTS), chat_name: 'Invoice 42', network: 'email' };
+    serve({ '/v1/messages/search': () => json(200, { messages: [hit, mail] }) });
+    const cap = captureIo(true);
+    expect(await run(['search', 'invoice'], cap.io)).toBe(0);
+    const [, first, second] = cap.stdout.trimEnd().split('\n');
+    expect(first).toMatch(new RegExp(`\\[image\\] Look at this · ${PHOTO_ID}$`));
+    expect(second).toMatch(new RegExp(`Here is the invoice\\. Thanks! · ${INVOICE_ID} · ${LOGO_ID}$`));
+
+    // A long caption is cut; the ID never is.
+    const long = { ...captioned, text: 'word '.repeat(80) };
+    const line = eventLine({
+      id: 'evt_1',
+      type: 'message.received',
+      timestamp: '2026-10-27T09:00:00.000Z',
+      data: { message: long, chat: { id: MOM.id, name: 'Mom', network: 'whatsapp' } },
+    });
+    expect(line).toMatch(new RegExp(`\\[whatsapp\\] Mom — Mom: \\[image\\] word .*… · ${PHOTO_ID}$`));
   });
 });
 

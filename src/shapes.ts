@@ -147,6 +147,7 @@ export interface Message {
   text: string | null;
   truncated: boolean;
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'other';
+  /** The file the message carries; `id` is the media ID `chesly download` takes. Null for an email. */
   media: { id: string; mime_type?: string; file_name?: string } | null;
   sent_at: string;
   edited: boolean;
@@ -154,6 +155,38 @@ export interface Message {
   reply_to: string | null;
   /** How far a message sent through the API got, for 30 days; null for every other message. */
   delivery?: Delivery | null;
+  /** An email's headers and attachments, on network `email` only. */
+  email?: EmailFields | null;
+}
+
+/** An email's headers and its attachments. An API from before attachments sends no `attachments`. */
+export interface EmailFields {
+  subject: string | null;
+  from: EmailAddress;
+  to: EmailAddress[];
+  cc: EmailAddress[];
+  attachments?: EmailAttachment[];
+}
+
+export interface EmailAddress {
+  name: string | null;
+  address: string;
+}
+
+/**
+ * A file attached to an email, as a person sees it attached (inline pictures of the body are not).
+ * Its `id` is a media ID, which `chesly download` takes as it takes a message's `media.id`.
+ */
+export interface EmailAttachment {
+  id: string;
+  file_name: string;
+  mime_type: string;
+  size: number;
+}
+
+/** An attachment the CLI can name: one with a media ID. Its other fields are checked where they are shown. */
+export function isEmailAttachment(value: unknown): value is EmailAttachment {
+  return isRecord(value) && typeof value.id === 'string' && value.id !== '';
 }
 
 export interface Delivery {
